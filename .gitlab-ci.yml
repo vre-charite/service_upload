@@ -1,0 +1,24 @@
+image: docker:latest
+
+variables:
+  REGISTRY: 10.32.42.225:5000
+  CONTAINER_IMAGE: ${REGISTRY}/upload:${CI_COMMIT_SHORT_SHA}
+
+build:
+  stage: build
+  tags:
+    - VRE-Deployment
+  script:
+    - docker login ${REGISTRY} -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
+    - docker build -t ${CONTAINER_IMAGE} .
+    - docker push ${CONTAINER_IMAGE}
+
+deploy:
+  stage: deploy
+  tags:
+    - VRE-Deployment
+  script:
+    - sed -i "s/<VERSION>/${CI_COMMIT_SHORT_SHA}/g" kubernetes/vre-deployment.yaml
+    - sed -i "s/<VERSION>/${CI_COMMIT_SHORT_SHA}/g" kubernetes/greenroom-deployment.yaml
+    - kubectl apply -f kubernetes/vre-deployment.yaml
+    - kubectl apply -f kubernetes/greenroom-deployment.yaml

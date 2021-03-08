@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upload
+  namespace: greenroom
+  labels:
+    app: upload
+    env: charite
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: upload
+      env: charite
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 33%
+  template:
+    metadata:
+      labels:
+        app: upload
+        env: charite
+    spec:
+      containers:
+        - name: upload
+          image: 10.32.42.225:5000/upload:<VERSION>
+          ports:
+            - containerPort: 5079
+          env:
+          - name: env
+            value: "charite"
+          readinessProbe:
+            tcpSocket:
+              port: 5079
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "1"
+            limits:
+              memory: "32Gi"
+              cpu: "1"
+      nodeSelector:
+        namespace: greenroom
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: upload
+  namespace: greenroom
+  labels:
+    app: upload
+    env: charite
+spec:
+  ports:
+  - name: http
+    port: 5079
+    targetPort: 5079
+  selector:
+    app: upload
+    env: charite
+  type: ClusterIP
