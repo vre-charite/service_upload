@@ -43,8 +43,15 @@ spec:
             limits:
               memory: "32Gi"
               cpu: "1"
+          volumeMounts:
+          - name: nfsvol
+            mountPath: /data/vre-storage
       nodeSelector:
         namespace: greenroom
+      volumes:
+        - name: nfsvol
+          persistentVolumeClaim:
+            claimName: greenroom-storage
 ---
 apiVersion: v1
 kind: Service

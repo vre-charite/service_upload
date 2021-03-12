@@ -43,8 +43,15 @@ spec:
             limits:
               memory: "32Gi"
               cpu: "1"
+          volumeMounts:
+          - name: nfsvol-vre-data
+            mountPath: /vre-data
       nodeSelector:
         namespace: vre
+      volumes:
+        - name: nfsvol-vre-data
+          persistentVolumeClaim:
+            claimName: vre-data
 ---
 apiVersion: v1
 kind: Service
