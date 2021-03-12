@@ -15,9 +15,8 @@ class ConfigClass(object):
     DATA_OPS_GR = "http://dataops-gr.greenroom:5063"
     BFF_PORTAL = "http://10.3.7.226:5060"
     DATA_OPS_UTIL = "http://dataops-ut.utility:5063"
-    # UTILITY_SERVICE = "http://common.utility:5062"
-    UTILITY_SERVICE = "http://10.3.7.222:5062"
-    PROVENANCE_SERVICE = "http://10.3.7.202:5077"
+    UTILITY_SERVICE = "http://common.utility:5062"
+    PROVENANCE_SERVICE = "http://provenance.utility:5077"
 
     # disk mounts
     ROOT_PATH = {
