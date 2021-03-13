@@ -31,6 +31,8 @@ spec:
           env:
           - name: env
             value: "charite"
+          - name: namespace
+            value: "vre"
           readinessProbe:
             tcpSocket:
               port: 5079
