@@ -8,57 +8,18 @@ from ..config import ConfigClass
 from ..commons.data_providers.redis import SrvRedisSingleton
 
 
-def get_geid(entity_type: str):
+def get_geid():
     '''
     get geid
     http://10.3.7.222:5062/v1/utility/id?entity_type=data_upload
     '''
     url = ConfigClass.UTILITY_SERVICE + \
-        "/v1/utility/id?entity_type={}".format(entity_type)
+        "/v1/utility/id"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()['result']
     else:
         raise Exception('{}: {}'.format(response.status_code, url))
-
-
-def set_status(session_id, job_id, source, action, target_status,
-               project_code, operator, payload=None, progress=0):
-    '''
-    set session job status
-    '''
-    srv_redis = SrvRedisSingleton()
-    my_key = "dataaction:{}:{}:{}:{}:{}:{}".format(
-        session_id, job_id, action, project_code, operator, source)
-    record = {
-        "session_id": session_id,
-        "job_id": job_id,
-        "source": source,
-        "action": action,
-        "status": target_status,
-        "project_code": project_code,
-        "operator": operator,
-        "progress": progress,
-        "payload": payload,
-        'update_timestamp': str(round(time.time()))
-    }
-    my_value = json.dumps(record)
-    srv_redis.set_by_key(my_key, my_value)
-    return record
-
-
-def get_status(session_id, job_id, project_code, action, operator=None):
-    '''
-    get session job status from datastore
-    '''
-    srv_redis = SrvRedisSingleton()
-    my_key = "dataaction:{}:{}:{}:{}".format(
-        session_id, job_id, action, project_code)
-    if operator:
-        my_key = "dataaction:{}:{}:{}:{}:{}".format(
-            session_id, job_id, action, project_code, operator)
-    res_binary = srv_redis.mget_by_prefix(my_key)
-    return [json.loads(record.decode('utf-8')) for record in res_binary] if res_binary else []
 
 
 def delete_by_session_id(session_id: str, job_id: str = "*", action: str = "*"):

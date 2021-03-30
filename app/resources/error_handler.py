@@ -42,6 +42,8 @@ class ECustomizedError(enum.Enum):
     INVALID_TOKEN = "INVALID_TOKEN"
     INTERNAL = "INTERNAL"
     INVALID_DATATYPE = "INVALID_DATATYPE"
+    INVALID_FOLDERNAME = "INVALID_FOLDERNAME"
+    INVALID_FILENAME = "INVALID_FILENAME"
 
 
 def customized_error_template(customized_error: ECustomizedError):
@@ -57,7 +59,9 @@ def customized_error_template(customized_error: ECustomizedError):
         "TOKEN_EXPIRED": "[Invalid Token] Already expired.",
         "INVALID_TOKEN": "[Invalid Token] %s",
         "INTERNAL": "[Internal] %s",
-        "INVALID_DATATYPE": "[Invalid DataType]: %s"
+        "INVALID_DATATYPE": "[Invalid DataType]: %s",
+        "INVALID_FOLDERNAME": "[Invalid Folder] Folder Name has already taken by other resources(file/folder)",
+        "INVALID_FILENAME": "[Invalid File] File Name has already taken by other resources(file/folder)"
     }.get(
         customized_error.name, "Unknown Error"
     )

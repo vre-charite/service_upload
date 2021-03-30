@@ -1,11 +1,17 @@
 from enum import Enum
 from pydantic import BaseModel, Field
 from .base_models import APIResponse
+from typing import List, Optional
 
 
-class EDataType(Enum):
-    SINGLE_FILE_DATA = 1
-    BITS_FILE_DATA = 5
+class EUploadJobType(Enum):
+    AS_FOLDER = "AS_FOLDER"
+    AS_FILE = "AS_FILE"
+
+
+class SingleFileForm(BaseModel):
+    resumable_filename: str
+    resumable_relative_path: str = ""
 
 
 class PreUploadPOST(BaseModel):
@@ -14,29 +20,109 @@ class PreUploadPOST(BaseModel):
     '''
     project_code: str
     operator: str
-    resumable_filename: str
-    resumable_dataType: str = EDataType.SINGLE_FILE_DATA.name
+    job_type: str = "AS_FOLDER | AS_FILE"
+    folder_tags: List[str] = []
+    data: List[SingleFileForm]
     upload_message = ""
+    current_folder_node = ""
 
 
 class PreUploadResponse(APIResponse):
     '''
     Pre upload response class
     '''
-    result: dict = Field({}, example={
-        "session_id": "unique_session",
-        "job_id": "upload-0a572418-7c2b-11eb-8428-be498ca98c54-1614780986",
-        "source": "/data/vre-storage/em0301/raw/test_file_01",
-        "action": "data_upload",
-        "status": "PRE_UPLOADED | SUCCEED",
-        "project_code": "em0301",
-        "operator": "zhengyang",
-        "progress": 0,
-        "payload": {
-            "resumable_identifier": "upload-0a572418-7c2b-11eb-8428-be498ca98c54-1614780986"
+    result: dict = Field({}, example=[
+        {
+            "session_id": "unique_session_2021",
+            "job_id": "1bfe8fd8-8b41-11eb-a8bd-eaff9e667817-1616439732",
+            "source": "file1.png",
+            "action": "data_upload",
+            "status": "PRE_UPLOADED",
+            "project_code": "gregtest",
+            "operator": "zhengyang",
+            "progress": 0,
+            "payload": {
+                "resumable_identifier": "1bfe8fd8-8b41-11eb-a8bd-eaff9e667817-1616439732",
+                "parent_folder_geid": "1bcbe182-8b41-11eb-bf7a-eaff9e667817-1616439732"
+            },
+            "update_timestamp": "1616439731"
         },
-        "update_timestamp": "1614780986"
-    }
+        {
+            "session_id": "unique_session_2021",
+            "job_id": "1c90ceac-8b41-11eb-bf7a-eaff9e667817-1616439733",
+            "source": "a/b/file1.png",
+            "action": "data_upload",
+            "status": "PRE_UPLOADED",
+            "project_code": "gregtest",
+            "operator": "zhengyang",
+            "progress": 0,
+            "payload": {
+                "resumable_identifier": "1c90ceac-8b41-11eb-bf7a-eaff9e667817-1616439733",
+                "parent_folder_geid": "1c67ba8a-8b41-11eb-845f-eaff9e667817-1616439733"
+            },
+            "update_timestamp": "1616439732"
+        },
+        {
+            "session_id": "unique_session_2021",
+            "job_id": "1cfd235e-8b41-11eb-a8bd-eaff9e667817-1616439734",
+            "source": "a/b/c/file2.png",
+            "action": "data_upload",
+            "status": "PRE_UPLOADED",
+            "project_code": "gregtest",
+            "operator": "zhengyang",
+            "progress": 0,
+            "payload": {
+                "resumable_identifier": "1cfd235e-8b41-11eb-a8bd-eaff9e667817-1616439734",
+                "parent_folder_geid": "1cd44d62-8b41-11eb-8a88-eaff9e667817-1616439733"
+            },
+            "update_timestamp": "1616439733"
+        },
+        {
+            "session_id": "unique_session_2021",
+            "job_id": "1d4696f6-8b41-11eb-8a88-eaff9e667817-1616439734",
+            "source": "a/b/c/file3.png",
+            "action": "data_upload",
+            "status": "PRE_UPLOADED",
+            "project_code": "gregtest",
+            "operator": "zhengyang",
+            "progress": 0,
+            "payload": {
+                "resumable_identifier": "1d4696f6-8b41-11eb-8a88-eaff9e667817-1616439734",
+                "parent_folder_geid": "1cd44d62-8b41-11eb-8a88-eaff9e667817-1616439733"
+            },
+            "update_timestamp": "1616439733"
+        },
+        {
+            "session_id": "unique_session_2021",
+            "job_id": "1daf9192-8b41-11eb-8a88-eaff9e667817-1616439735",
+            "source": "a/b/c/d/file4.png",
+            "action": "data_upload",
+            "status": "PRE_UPLOADED",
+            "project_code": "gregtest",
+            "operator": "zhengyang",
+            "progress": 0,
+            "payload": {
+                "resumable_identifier": "1daf9192-8b41-11eb-8a88-eaff9e667817-1616439735",
+                "parent_folder_geid": "1d8a22cc-8b41-11eb-a8bd-eaff9e667817-1616439734"
+            },
+            "update_timestamp": "1616439734"
+        },
+        {
+            "session_id": "unique_session_2021",
+            "job_id": "1e662e20-8b41-11eb-8a88-eaff9e667817-1616439736",
+            "source": "a/e/c/d/file4.png",
+            "action": "data_upload",
+            "status": "PRE_UPLOADED",
+            "project_code": "gregtest",
+            "operator": "zhengyang",
+            "progress": 0,
+            "payload": {
+                "resumable_identifier": "1e662e20-8b41-11eb-8a88-eaff9e667817-1616439736",
+                "parent_folder_geid": "1e3fa930-8b41-11eb-845f-eaff9e667817-1616439736"
+            },
+            "update_timestamp": "1616439735"
+        }
+    ]
     )
 
 
@@ -48,11 +134,10 @@ class ChunkUploadPOST(BaseModel):
     operator: str
     resumable_identifier: str
     resumable_filename: str
-    resumable_dataType: str = EDataType.SINGLE_FILE_DATA.name
     resumable_chunk_number: int
     resumable_total_chunks: int
     resumable_total_size: float
-    tags: list = []
+    tags: List[str] = []
     generate_id: str = "undefined"
     metadatas: dict = None
 
@@ -75,10 +160,10 @@ class OnSuccessUploadPOST(BaseModel):
     operator: str
     resumable_identifier: str
     resumable_filename: str
-    resumable_dataType: str = EDataType.SINGLE_FILE_DATA.name
+    resumable_relative_path: str
     resumable_total_chunks: int
     resumable_total_size: float
-    tags: list = []
+    tags: List[str] = []
     generate_id: str = "undefined"
     metadatas: dict = None
     process_pipeline: str = None
@@ -101,9 +186,32 @@ class GETJobStatusResponse(APIResponse):
             "operator": "zhengyang",
             "progress": 0,
             "payload": {
-                "resumable_identifier": "upload-0a572418-7c2b-11eb-8428-be498ca98c54-1614780986"
+                "resumable_identifier": "upload-0a572418-7c2b-11eb-8428-be498ca98c54-1614780986",
+                "parent_folder_geid": "1e3fa930-8b41-11eb-845f-eaff9e667817-1616439736"
             },
             "update_timestamp": "1614780986"
         }
     ]
+    )
+
+
+class POSTCombineChunksResponse(APIResponse):
+    '''
+    get Job status response class
+    '''
+    result: dict = Field({}, example={
+        "session_id": "unique_session",
+        "job_id": "upload-0a572418-7c2b-11eb-8428-be498ca98c54-1614780986",
+        "source": "/data/vre-storage/em0301/raw/test_file_01",
+        "action": "data_upload",
+        "status": "PRE_UPLOADED | SUCCEED",
+        "project_code": "em0301",
+        "operator": "zhengyang",
+        "progress": 0,
+        "payload": {
+            "resumable_identifier": "upload-0a572418-7c2b-11eb-8428-be498ca98c54-1614780986",
+            "parent_folder_geid": "1e3fa930-8b41-11eb-845f-eaff9e667817-1616439736"
+        },
+        "update_timestamp": "1614780986"
+    }
     )

@@ -4,7 +4,7 @@ import os
 class ConfigClass(object):
     env = os.environ.get('env')
 
-    version = "0.1.1"
+    version = "0.2.2"
 
     # microservices
     NEO4J_SERVICE = "http://neo4j.utility:5062/v1/neo4j/"

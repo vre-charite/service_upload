@@ -15,7 +15,7 @@ class SrvFileDataMgr():
                file_size, desc, namespace,
                data_type, project_code, labels,
                generate_id, operator=None, from_parents=None,
-               process_pipeline=None):
+               process_pipeline=None, parent_folder_geid=None):
         '''
         Create File Data Entity V2
         '''
@@ -30,7 +30,8 @@ class SrvFileDataMgr():
             "data_type": data_type,
             "project_code": project_code,
             "labels": labels,
-            "generate_id": generate_id
+            "generate_id": generate_id,
+            "parent_folder_geid": parent_folder_geid if parent_folder_geid else ""
         }
         self.logger.debug('SrvFileDataMgr post_json_form' +
                           str(post_json_form))
