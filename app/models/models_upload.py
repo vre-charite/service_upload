@@ -12,6 +12,7 @@ class EUploadJobType(Enum):
 class SingleFileForm(BaseModel):
     resumable_filename: str
     resumable_relative_path: str = ""
+    generate_id: str = "undefined"
 
 
 class PreUploadPOST(BaseModel):
@@ -25,6 +26,7 @@ class PreUploadPOST(BaseModel):
     data: List[SingleFileForm]
     upload_message = ""
     current_folder_node = ""
+    incremental = False
 
 
 class PreUploadResponse(APIResponse):

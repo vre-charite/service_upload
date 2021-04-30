@@ -103,11 +103,11 @@ def send_to_queue(payload, logger):
     return json.loads(res.text)
 
 
-def get_file_type():
-    '''
-    change file type based on service namespace
-    '''
-    return {
-        "vre": "processed",
-        "greenroom": "raw"
-    }.get(os.environ.get('namespace'), "raw")
+# def get_file_type():
+#     '''
+#     change file type based on service namespace
+#     '''
+#     return {
+#         "vre": "processed",
+#         "greenroom": "raw"
+#     }.get(os.environ.get('namespace'), "raw")

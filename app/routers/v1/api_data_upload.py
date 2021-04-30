@@ -13,7 +13,7 @@ from ...commons.logger_services.logger_factory_service import SrvLoggerFactory
 from ...commons.data_providers import session_job_get_status
 from ...resources.error_handler import catch_internal, ECustomizedError, customized_error_template
 from ...resources.helpers import update_file_operation_logs, get_geid, get_project, send_to_queue, \
-    delete_by_session_id, get_file_type
+    delete_by_session_id
 from ...models.folder import FolderMgr, FolderNode
 from ...models.file_data import SrvFileDataMgr
 from ...models.tag import SrvTagsMgr
@@ -57,11 +57,19 @@ class APIUpload:
             project_info = get_project(request_payload.project_code)
             raw_folder_path = get_raw_folder_path(request_payload.project_code)
             created_folders_cache: List[FolderNode] = []
+            task_id = get_geid()
+            # filename converting
+            for upload_data in request_payload.data:
+                upload_data.resumable_filename = upload_data.generate_id + "_" + upload_data.resumable_filename \
+                    if upload_data.generate_id and upload_data.generate_id != "undefined" \
+                    else upload_data.resumable_filename
             # handle folder/filename conflicts
             conflict_file_paths = get_conflict_file_paths(
                 request_payload.data, raw_folder_path)
             conflict_folder_paths = get_conflict_folder_paths(
-                request_payload.data, raw_folder_path, request_payload.current_folder_node)
+                request_payload.data, raw_folder_path, request_payload.current_folder_node,
+                request_payload.incremental) if request_payload.job_type == EUploadJobType.AS_FOLDER.name \
+                else []
             if len(conflict_file_paths) > 0 or len(conflict_folder_paths) > 0:
                 return response_conflic_folder_file_names(
                     _res, conflict_file_paths, conflict_folder_paths
@@ -103,6 +111,8 @@ class APIUpload:
                 status_mgr.set_job_id(resumable_identifier)
                 status_mgr.set_source(relative_full_path)
                 status_mgr.add_payload(
+                    "task_id", task_id)
+                status_mgr.add_payload(
                     "resumable_identifier", resumable_identifier)
                 status_mgr.add_payload(
                     "parent_folder_geid", last_folder_node_geid)
@@ -124,7 +134,7 @@ class APIUpload:
             return _res.json_response()
         else:
             _res.code = EAPIResponseCode.bad_request
-            _res.error_msg = "Invalid data type: {}".format(
+            _res.error_msg = "Invalid job type: {}".format(
                 request_payload.job_type)
             return _res.json_response()
 
@@ -197,6 +207,9 @@ class APIUpload:
         metadatas = {
             "generate_id": generate_id
         }
+        # check generate id
+        resumable_filename = generate_id + "_" + resumable_filename \
+            if generate_id and generate_id != "undefined" else resumable_filename
         temp_dir = get_temp_dir(resumable_identifier)
         raw_folder_path = get_raw_folder_path(project_code)
         file_full_path = os.path.join(
@@ -245,6 +258,10 @@ class APIUpload:
             _res.result = {}
             _res.error_msg = "Invalid Session ID: " + str(session_id)
             return _res.json_response()
+        # check generate id
+        request_payload.resumable_filename = request_payload.generate_id + "_" + request_payload.resumable_filename \
+            if request_payload.generate_id and request_payload.generate_id != "undefined" \
+            else request_payload.resumable_filename
         temp_dir = get_temp_dir(request_payload.resumable_identifier)
         raw_folder_path = get_raw_folder_path(request_payload.project_code)
         file_full_path = os.path.join(
@@ -345,7 +362,6 @@ def finalize_worker(logger,
         shutil.move(temp_merged_file_full_path, target_head)
         # create entity file data
         file_meta_mgr = SrvFileDataMgr(logger)
-        file_type = get_file_type()
         res_create_meta = file_meta_mgr.create(
             request_payload.operator,
             target_tail,
@@ -353,7 +369,6 @@ def finalize_worker(logger,
             request_payload.resumable_total_size,
             'Raw file in {}'.format(namespace),
             namespace,
-            file_type,
             request_payload.project_code,
             request_payload.tags,
             request_payload.generate_id,
@@ -369,6 +384,19 @@ def finalize_worker(logger,
             logger.info('done with creating atlas record v2')
         # get created entity
         created_entity = res_create_meta["result"]
+
+        # add upload logs
+        update_file_operation_logs(
+            request_payload.operator,
+            request_payload.operator,
+            target_file_full_path,
+            request_payload.resumable_total_size,
+            request_payload.project_code,
+            request_payload.generate_id,
+            extra={
+                "upload_message": request_payload.upload_message
+            }
+        )
         # update tag frequence in redis
         project_id = get_project(request_payload.project_code)['result']['id']
         for tag in request_payload.tags:
@@ -392,18 +420,6 @@ def finalize_worker(logger,
         status_mgr.add_payload(
             "source_geid",  created_entity["global_entity_id"])
         status_mgr.go(EState.SUCCEED)
-        # add upload logs
-        update_file_operation_logs(
-            request_payload.operator,
-            request_payload.operator,
-            target_file_full_path,
-            request_payload.resumable_total_size,
-            request_payload.project_code,
-            request_payload.generate_id,
-            extra={
-                "upload_message": request_payload.upload_message
-            }
-        )
 
     except FileNotFoundError:
         error_msg = 'folder {} is already empty'.format(temp_dir)
@@ -428,7 +444,7 @@ def get_root_folder(folder_path):
         return get_root_folder(parent_folder)
 
 
-def get_conflict_folder_paths(data, raw_folder_path, current_folder_node):
+def get_conflict_folder_paths(data, raw_folder_path, current_folder_node, incremental):
     '''
     return conflict folder paths
     '''
@@ -438,7 +454,9 @@ def get_conflict_folder_paths(data, raw_folder_path, current_folder_node):
         target_folder = current_folder_node if current_folder_node \
             else get_root_folder(upload_data.resumable_relative_path)
         target_folder_full_path = os.path.join(raw_folder_path, target_folder)
-        if target_folder and os.path.exists(target_folder_full_path):
+        exists_condition = os.path.isfile(target_folder_full_path) if incremental \
+            else os.path.exists(target_folder_full_path)
+        if target_folder and exists_condition:
             conflict_folder_paths.append({
                 "name": os.path.basename(target_folder),
                 "relative_path": os.path.dirname(target_folder),

@@ -12,8 +12,7 @@ class SrvFileDataMgr():
         self.logger = logger
 
     def create(self, uploader, file_name, path,
-               file_size, desc, namespace,
-               data_type, project_code, labels,
+               file_size, desc, namespace, project_code, labels,
                generate_id, operator=None, from_parents=None,
                process_pipeline=None, parent_folder_geid=None):
         '''
@@ -27,7 +26,6 @@ class SrvFileDataMgr():
             "file_size": file_size,
             "description": desc,
             "namespace": namespace,
-            "data_type": data_type,
             "project_code": project_code,
             "labels": labels,
             "generate_id": generate_id,
