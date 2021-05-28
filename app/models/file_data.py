@@ -18,7 +18,7 @@ class SrvFileDataMgr():
         '''
         Create File Data Entity V2
         '''
-        url = self.base_url + "/v1/filedata"
+        url = self.base_url + "filedata"
         post_json_form = {
             "uploader": uploader,
             "file_name": file_name,
@@ -40,6 +40,7 @@ class SrvFileDataMgr():
         if from_parents:
             post_json_form['parent_query'] = from_parents
         res = requests.post(url=url, json=post_json_form)
+        self.logger.debug('SrvFileDataMgr create results: ' + res.text)
         if res.status_code == 200:
             return res.json()
         else:

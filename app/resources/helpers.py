@@ -14,7 +14,7 @@ def get_geid():
     http://10.3.7.222:5062/v1/utility/id?entity_type=data_upload
     '''
     url = ConfigClass.UTILITY_SERVICE + \
-        "/v1/utility/id"
+        "utility/id"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()['result']
@@ -38,7 +38,7 @@ def update_file_operation_logs(owner, operator, download_path, file_size, projec
     Endpoint
     /v1/file/actions/logs
     '''
-    url = ConfigClass.DATA_OPS_GR + '/v1/file/actions/logs'
+    url = ConfigClass.DATA_OPS_GR + 'file/actions/logs'
     payload = {
         "operation_type": operation_type,
         "owner": owner,
@@ -54,7 +54,7 @@ def update_file_operation_logs(owner, operator, download_path, file_size, projec
         json=payload
     )
     # new audit log api
-    url_audit_log = ConfigClass.PROVENANCE_SERVICE + '/v1/audit-logs'
+    url_audit_log = ConfigClass.PROVENANCE_SERVICE + 'audit-logs'
     payload_audit_log = {
         "action": operation_type,
         "operator": operator,
@@ -76,9 +76,14 @@ def get_project(project_code):
     '''
     get project if exists(which is valid)
     '''
-    url = ConfigClass.BFF_PORTAL + "/v1/project/code/{}".format(project_code)
-    res_project = requests.get(url)
-    return internal_jsonrespon_handler(url, res_project)
+    data = {
+        "code": project_code,
+    }
+    response = requests.post(ConfigClass.NEO4J_SERVICE + f"nodes/Dataset/query", json=data)
+    result = response.json()
+    if not result:
+        return result
+    return result[0]
 
 
 def check_valid_full_path(full_path):
@@ -92,7 +97,7 @@ def send_to_queue(payload, logger):
     '''
     send message to queue
     '''
-    url = ConfigClass.SEND_MESSAGE_URL
+    url = ConfigClass.QUEUE_SERVICE + "send_message"
     logger.info("Sending Message To Queue: " + str(payload))
     res = requests.post(
         url=url,
@@ -111,3 +116,12 @@ def send_to_queue(payload, logger):
 #         "vre": "processed",
 #         "greenroom": "raw"
 #     }.get(os.environ.get('namespace'), "raw")
+
+def get_zone(namespace: str):
+    return {
+        "vre": "vrecore",
+        "vrecore": "vrecore",
+        "greenroom": "greenroom",
+        "Greenroom": "greenroom",
+        "Vrecore": "vrecore"
+    }.get(namespace, "greenroom")

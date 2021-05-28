@@ -14,7 +14,7 @@ def tearDownModule():
 class TestAPI(unittest.TestCase):
     log = Logger(name='test_api.log')
     test = SetupTest(log)
-    app = test.client
+    # app = test.client
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -32,4 +32,6 @@ class TestAPI(unittest.TestCase):
 
     def test_01_api(self):
         self.log.info("test case 1")
+
+
 

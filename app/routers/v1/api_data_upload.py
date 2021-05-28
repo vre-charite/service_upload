@@ -55,6 +55,11 @@ class APIUpload:
         if request_payload.job_type == EUploadJobType.AS_FILE.name \
                 or request_payload.job_type == EUploadJobType.AS_FOLDER.name:
             project_info = get_project(request_payload.project_code)
+            if not project_info:
+                _res.code = EAPIResponseCode.not_found
+                _res.result = {}
+                _res.error_msg = "Dataset not found"
+                return _res.json_response()
             raw_folder_path = get_raw_folder_path(request_payload.project_code)
             created_folders_cache: List[FolderNode] = []
             task_id = get_geid()
@@ -78,7 +83,7 @@ class APIUpload:
                 # create folder and folder nodes
                 folder_mgr = FolderMgr(
                     created_folders_cache,
-                    project_info["result"]["global_entity_id"],
+                    project_info["global_entity_id"],
                     request_payload.project_code,
                     raw_folder_path,
                     upload_data.resumable_relative_path,
@@ -297,14 +302,19 @@ class APIUpload:
 
 
 def get_raw_folder_path(project_code):
+    namespace = os.environ.get('namespace')
     # (optional) check if the folder is not existed
     raw_folder_path = os.path.join(
         ConfigClass.ROOT_PATH, project_code)
-    raw_folder_path = os.path.join(raw_folder_path, "raw")
+    if namespace == "vre" or namespace == "vrecore":
+        raw_folder_path = os.path.join(raw_folder_path)
+    elif namespace == "greenroom":
+        raw_folder_path = os.path.join(raw_folder_path, "raw")
+        # os.makedirs(raw_folder_path)
     # check raw folder path valid
     if not os.path.isdir(raw_folder_path):
         raise(Exception('Folder raw does not existed: %s' %
-                        (raw_folder_path)))
+                        raw_folder_path))
     return raw_folder_path
 
 
@@ -398,7 +408,7 @@ def finalize_worker(logger,
             }
         )
         # update tag frequence in redis
-        project_id = get_project(request_payload.project_code)['result']['id']
+        project_id = get_project(request_payload.project_code)['id']
         for tag in request_payload.tags:
             SrvTagsMgr().add_freq(project_id, tag)
         # send to queue
@@ -414,12 +424,14 @@ def finalize_worker(logger,
             "create_timestamp": time.time()
         }
         send_to_queue(payload, logger)
+        logger.info('sent to queue.')
         # clean up tmp folder
         status_mgr.go(EState.FINALIZED)
         shutil.rmtree(temp_dir)
         status_mgr.add_payload(
             "source_geid",  created_entity["global_entity_id"])
         status_mgr.go(EState.SUCCEED)
+        logger.info('Upload Job Done.')
 
     except FileNotFoundError:
         error_msg = 'folder {} is already empty'.format(temp_dir)

@@ -1,5 +1,6 @@
 import os
 
+# os.environ['env'] = 'test'
 
 class ConfigClass(object):
     env = os.environ.get('env')
@@ -8,16 +9,21 @@ class ConfigClass(object):
 
     # microservices
     NEO4J_SERVICE = "http://neo4j.utility:5062/v1/neo4j/"
-    NEO4J_HOST = "http://neo4j.utility:5062"
-    FILEINFO_HOST = "http://entityinfo.utility:5066"
-    METADATA_API = "http://cataloguing.utility:5064"
-    SEND_MESSAGE_URL = "http://queue-producer.greenroom:6060/v1/send_message"
-    DATA_OPS_GR = "http://dataops-gr.greenroom:5063"
-    # BFF_PORTAL = "http://10.3.7.226:5060"
-    BFF_PORTAL = "http://bff.utility:5060"
-    DATA_OPS_UTIL = "http://dataops-ut.utility:5063"
-    UTILITY_SERVICE = "http://common.utility:5062"
-    PROVENANCE_SERVICE = "http://provenance.utility:5077"
+    NEO4J_SERVICE_V2  = "http://neo4j.utility:5062/v2/neo4j/"
+    ENTITYINFO_SERVICE = "http://entityinfo.utility:5066/v1/"
+    QUEUE_SERVICE = "http://queue-producer.greenroom:6060/v1/"
+    DATA_OPS_GR = "http://dataops-gr.greenroom:5063/v1/"
+    DATA_OPS_UTIL = "http://dataops-ut.utility:5063/v1/"
+    PROVENANCE_SERVICE = "http://provenance.utility:5077/v1/"
+    UTILITY_SERVICE = "http://common.utility:5062/v1/"
+
+    if env == "test":
+        NEO4J_SERVICE = "http://10.3.7.216:5062/v1/neo4j/"
+        NEO4J_SERVICE_V2 = "http://10.3.7.216:5062/v2/neo4j/"
+        ENTITYINFO_SERVICE = "http://10.3.7.228:5066/v1/"
+        DATA_UTILITY_SERVICE = "http://10.3.7.239:5063/v1/"
+        PROVENANCE_SERVICE = "http://10.3.7.202:5077/v1/"
+        UTILITY_SERVICE = "http://10.3.7.222:5062/v1/"
 
     # disk mounts
     ROOT_PATH = {

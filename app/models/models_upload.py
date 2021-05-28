@@ -217,3 +217,42 @@ class POSTCombineChunksResponse(APIResponse):
         "update_timestamp": "1614780986"
     }
     )
+
+
+class CreateFolderPOST(BaseModel):
+    """create folder request payload model"""
+    folder_name: str
+    destination_geid: Optional[str] = None
+    zone: str
+    project_code: str
+    uploader: str
+    tags: List[str] = []
+
+
+class CreateFolderPOSTResponse(APIResponse):
+    """ Response model for folder creation POST request"""
+    result: dict = Field({}, example={
+                    "code": 200,
+                    "error_msg": "",
+                    "page": 0,
+                    "total": 1,
+                    "num_of_pages": 1,
+                    "result": {
+                        "id": 10170,
+                        "labels": [
+                            "Folder",
+                            "Greenroom"
+                        ],
+                        "name": "test1",
+                        "time_created": "2021-05-05T22:33:49",
+                        "time_lastmodified": "2021-05-05T22:33:49",
+                        "global_entity_id": "9491b055-4c63-4987-9e1a-778dcec699ec-1620254029",
+                        "folder_level": 1,
+                        "folder_relative_path": "",
+                        "project_code": "04142",
+                        "tags": [],
+                        "list_priority": 10,
+                        "uploader": "varsha"
+                    }
+                }
+        )

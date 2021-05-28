@@ -10,3 +10,4 @@ python-multipart==0.0.5
 python-json-logger==0.1.11
 aiofiles==0.6.0
 redis==3.5.3
+Flask-JWT==0.3.2

@@ -128,12 +128,11 @@ class FolderNode:
         query = {
             "folder_relative_path": self.folder_relative_path,
             "name": self.folder_name,
-            "project_code": self.project_code,
-            # "uploader": self.folder_creator
+            "project_code": self.project_code
         }
-        respon_query = http_query_node(query)
+        respon_query = http_query_node_zone(self.zone, query)
         if respon_query.status_code == 200:
-            json_respon = respon_query.json()
+            json_respon = respon_query.json().get('result')
             found = [node for node in json_respon if node["folder_relative_path"] ==
                      self.folder_relative_path and node["name"] == self.folder_name
                      and node["project_code"] == self.project_code]
@@ -175,7 +174,7 @@ class FolderNode:
             "project_code": self.project_code,
             "folder_tags": self.folder_tags
         }
-        create_url = ConfigClass.FILEINFO_HOST + "/v1/folders"
+        create_url = ConfigClass.ENTITYINFO_SERVICE + "folders"
         respon = requests.post(create_url, json=payload)
         if respon.status_code == 200:
             pass
@@ -271,6 +270,22 @@ def http_query_node(namespace, query_params={}):
     payload = {
         **query_params
     }
-    node_query_url = ConfigClass.NEO4J_HOST + "/v1/neo4j/nodes/Folder/query"
+    node_query_url = ConfigClass.NEO4J_SERVICE + "nodes/Folder/query"
+    response = requests.post(node_query_url, json=payload)
+    return response
+
+
+def http_query_node_zone(namespace, query_params={}):
+    if namespace.lower() in ['vrecore', 'greenroom']:
+        zone = {'vrecore': 'VRECore',
+                'greenroom': 'Greenroom'}.get(namespace.lower())
+        zone_label = ['Folder', zone]
+    else:
+        zone_label = ['Folder']
+    query_params['labels'] = zone_label
+    payload = {'query': {
+        **query_params}
+    }
+    node_query_url = ConfigClass.NEO4J_SERVICE_V2 + "nodes/query"
     response = requests.post(node_query_url, json=payload)
     return response
