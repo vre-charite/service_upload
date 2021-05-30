@@ -427,10 +427,16 @@ def finalize_worker(logger,
         logger.info('sent to queue.')
         # clean up tmp folder
         status_mgr.go(EState.FINALIZED)
-        shutil.rmtree(temp_dir)
-        status_mgr.add_payload(
-            "source_geid",  created_entity["global_entity_id"])
-        status_mgr.go(EState.SUCCEED)
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as exce:
+            logger.info("Upload on succeed rmtree error: " + str(exce))
+        try:
+            status_mgr.add_payload(
+                "source_geid",  created_entity["global_entity_id"])
+            status_mgr.go(EState.SUCCEED)
+        except Exception as exce:
+            logger.info("Upload on succeed set status as succeed error: " + str(exce))
         logger.info('Upload Job Done.')
 
     except FileNotFoundError:

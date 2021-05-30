@@ -23,5 +23,8 @@ class FsmMgrUpload(SessionJob):
         '''
         set status
         '''
-        self.set_status(target.name)
-        return self.save()
+        try:
+            self.set_status(target.name)
+            return self.save()
+        except Exception as exce:
+            raise

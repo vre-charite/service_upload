@@ -119,24 +119,27 @@ def session_job_set_status(session_id, job_id, source, action, target_status,
     '''
     set session job status
     '''
-    srv_redis = SrvRedisSingleton()
-    my_key = "dataaction:{}:{}:{}:{}:{}:{}".format(
-        session_id, job_id, action, project_code, operator, source)
-    record = {
-        "session_id": session_id,
-        "job_id": job_id,
-        "source": source,
-        "action": action,
-        "status": target_status,
-        "project_code": project_code,
-        "operator": operator,
-        "progress": progress,
-        "payload": payload,
-        'update_timestamp': str(round(time.time()))
-    }
-    my_value = json.dumps(record)
-    srv_redis.set_by_key(my_key, my_value)
-    return record
+    try:
+        srv_redis = SrvRedisSingleton()
+        my_key = "dataaction:{}:{}:{}:{}:{}:{}".format(
+            session_id, job_id, action, project_code, operator, source)
+        record = {
+            "session_id": session_id,
+            "job_id": job_id,
+            "source": source,
+            "action": action,
+            "status": target_status,
+            "project_code": project_code,
+            "operator": operator,
+            "progress": progress,
+            "payload": payload,
+            'update_timestamp': str(round(time.time()))
+        }
+        my_value = json.dumps(record)
+        srv_redis.set_by_key(my_key, my_value)
+        return record
+    except Exception as exce:
+        raise
 
 
 def session_job_get_status(session_id, job_id, project_code, action, operator=None):
