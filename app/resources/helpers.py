@@ -23,9 +23,10 @@ def generate_archive_preview(file_path, type="zip"):
                 filename = file.filename.split("/")[-2]
             current_path = results
             for path in file.filename.split("/")[:-1]:
-                if not current_path.get(path):
-                    current_path[path] = {"is_dir": True}
-                current_path = current_path[path]
+                if path:
+                    if not current_path.get(path):
+                        current_path[path] = {"is_dir": True}
+                    current_path = current_path[path]
 
             if not file.is_dir():
                 current_path[filename] = {
