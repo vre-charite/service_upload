@@ -6,6 +6,34 @@ import requests
 from .error_handler import internal_jsonrespon_handler
 from ..config import ConfigClass
 from ..commons.data_providers.redis import SrvRedisSingleton
+from zipfile import ZipFile
+
+
+def generate_archive_preview(file_path, type="zip"):
+    results = {}
+    if type == "zip":
+        ArchiveFile = ZipFile
+
+    with ArchiveFile(file_path, 'r') as archive:
+        for file in archive.infolist():
+            # get filename for file
+            filename = file.filename.split("/")[-1]
+            if not filename:
+                # get filename for folder
+                filename = file.filename.split("/")[-2]
+            current_path = results
+            for path in file.filename.split("/")[:-1]:
+                if not current_path.get(path):
+                    current_path[path] = {"is_dir": True}
+                current_path = current_path[path]
+
+            if not file.is_dir():
+                current_path[filename] = {
+                    "filename": filename,
+                    "size": file.file_size,
+                    "is_dir": False,
+                }
+    return results
 
 
 def get_geid():
@@ -79,7 +107,7 @@ def get_project(project_code):
     data = {
         "code": project_code,
     }
-    response = requests.post(ConfigClass.NEO4J_SERVICE + f"nodes/Dataset/query", json=data)
+    response = requests.post(ConfigClass.NEO4J_SERVICE + f"nodes/Container/query", json=data)
     result = response.json()
     if not result:
         return result

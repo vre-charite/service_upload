@@ -1,6 +1,8 @@
 import os
 import time
 import shutil
+import requests
+
 from typing import List
 from fastapi import APIRouter, BackgroundTasks, Header, File, UploadFile, Form
 from fastapi_utils import cbv
@@ -11,9 +13,10 @@ from ...models.models_upload import PreUploadResponse, PreUploadPOST,\
 from ...models.fsm_file_upload import EState, FsmMgrUpload
 from ...commons.logger_services.logger_factory_service import SrvLoggerFactory
 from ...commons.data_providers import session_job_get_status
+from ...commons.service_connection.minio_client import Minio_Client
 from ...resources.error_handler import catch_internal, ECustomizedError, customized_error_template
 from ...resources.helpers import update_file_operation_logs, get_geid, get_project, send_to_queue, \
-    delete_by_session_id
+    delete_by_session_id, generate_archive_preview
 from ...models.folder import FolderMgr, FolderNode
 from ...models.file_data import SrvFileDataMgr
 from ...models.tag import SrvTagsMgr
@@ -51,6 +54,7 @@ class APIUpload:
             _res.result = {}
             _res.error_msg = "Invalid Session ID: " + str(session_id)
             return _res.json_response()
+
         # check job type
         if request_payload.job_type == EUploadJobType.AS_FILE.name \
                 or request_payload.job_type == EUploadJobType.AS_FOLDER.name:
@@ -63,22 +67,28 @@ class APIUpload:
             raw_folder_path = get_raw_folder_path(request_payload.project_code)
             created_folders_cache: List[FolderNode] = []
             task_id = get_geid()
+
             # filename converting
             for upload_data in request_payload.data:
                 upload_data.resumable_filename = upload_data.generate_id + "_" + upload_data.resumable_filename \
                     if upload_data.generate_id and upload_data.generate_id != "undefined" \
                     else upload_data.resumable_filename
-            # handle folder/filename conflicts
+
+            # handle filename conflicts
             conflict_file_paths = get_conflict_file_paths(
-                request_payload.data, raw_folder_path)
+                request_payload.data, request_payload.project_code)
+            # also check the folder confilct. Note we might have the situation
+            # that folder is same name but with different files
             conflict_folder_paths = get_conflict_folder_paths(
-                request_payload.data, raw_folder_path, request_payload.current_folder_node,
+                request_payload.data, request_payload.project_code, request_payload.current_folder_node,
                 request_payload.incremental) if request_payload.job_type == EUploadJobType.AS_FOLDER.name \
                 else []
+
             if len(conflict_file_paths) > 0 or len(conflict_folder_paths) > 0:
                 return response_conflic_folder_file_names(
                     _res, conflict_file_paths, conflict_folder_paths
                 )
+
             for upload_data in request_payload.data:
                 # create folder and folder nodes
                 folder_mgr = FolderMgr(
@@ -263,10 +273,12 @@ class APIUpload:
             _res.result = {}
             _res.error_msg = "Invalid Session ID: " + str(session_id)
             return _res.json_response()
+
         # check generate id
         request_payload.resumable_filename = request_payload.generate_id + "_" + request_payload.resumable_filename \
             if request_payload.generate_id and request_payload.generate_id != "undefined" \
             else request_payload.resumable_filename
+
         temp_dir = get_temp_dir(request_payload.resumable_identifier)
         raw_folder_path = get_raw_folder_path(request_payload.project_code)
         file_full_path = os.path.join(
@@ -275,6 +287,7 @@ class APIUpload:
         relative_full_path = os.path.join(
             request_payload.resumable_relative_path,
             request_payload.resumable_filename)
+
         # init status manager
         status_mgr = FsmMgrUpload(
             session_id,
@@ -291,7 +304,8 @@ class APIUpload:
             )
             for x in range(1, request_payload.resumable_total_chunks + 1)
         ]
-        # add backgroud task
+
+        # add backgroud task to combine all recieved chunks
         background_tasks.add_task(finalize_worker, self.__logger, request_payload,
                                   status_mgr, chunk_paths, file_full_path, temp_dir)
         # set merging status
@@ -309,7 +323,11 @@ def get_raw_folder_path(project_code):
     if namespace == "vre" or namespace == "vrecore":
         raw_folder_path = os.path.join(raw_folder_path)
     elif namespace == "greenroom":
-        raw_folder_path = os.path.join(raw_folder_path, "raw")
+        # we decide to remove the raw folder for now it will upload 
+        # to the /project_code/
+        # raw_folder_path = os.path.join(raw_folder_path, "raw")
+        raw_folder_path = os.path.join(raw_folder_path)
+
         # os.makedirs(raw_folder_path)
     # check raw folder path valid
     if not os.path.isdir(raw_folder_path):
@@ -360,6 +378,7 @@ def finalize_worker(logger,
         target_head, target_tail = os.path.split(target_file_full_path)
         temp_merged_file_full_path = os.path.join(
             temp_dir, request_payload.resumable_filename)
+
         with open(temp_merged_file_full_path, 'ab') as temp_file:
             for p in chunk_paths:
                 stored_chunk_file_name = p
@@ -368,8 +387,40 @@ def finalize_worker(logger,
                 stored_chunk_file.close()
                 os.unlink(stored_chunk_file_name)
         logger.info('done with combinging chunks')
-        # transfer to nfs
-        shutil.move(temp_merged_file_full_path, target_head)
+
+        # here now we dont deprecate the nfs completely
+        # so we need to do some overwrite if the file exist
+        target_path = os.path.join(target_head, request_payload.resumable_filename)
+        shutil.move(temp_merged_file_full_path, target_path)
+
+        # for backup also sync to minio
+        logger.info("Minio Connection Test")
+        # format the bucket name and minio path
+        bucket = ("core-" if namespace == "vrecore" else "gr-") + request_payload.project_code
+        relative_path = target_file_full_path.replace(ConfigClass.ROOT_PATH, '')
+        _, obj_path = tuple(relative_path[1:].split('/', 1))
+        file_path = target_head + "/" + target_tail 
+
+        # since now we have the user node, remove this join
+        # obj_path = os.path.join(request_payload.operator, obj_path)
+        
+        version_id = ""
+        # after use the minio the generate pipeline will also use the minio location
+        minio_http = ("https://" if ConfigClass.MINIO_HTTPS else "http://") + ConfigClass.MINIO_ENDPOINT
+        minio_location = "minio://%s/%s/%s"%(minio_http, bucket, obj_path)
+        # minio_location = minio_location.encode('utf-8')
+        try:
+            mc = Minio_Client()
+            logger.info("Minio Connection Success")
+
+            result = mc.client.fput_object(
+                bucket, obj_path, os.path.join(target_head, request_payload.resumable_filename), 
+            )
+            version_id = result.version_id
+            logger.info("Minio Upload Success")
+        except Exception as e:
+            logger.error("error when uploading: "+str(e))
+
         # create entity file data
         file_meta_mgr = SrvFileDataMgr(logger)
         res_create_meta = file_meta_mgr.create(
@@ -382,6 +433,9 @@ def finalize_worker(logger,
             request_payload.project_code,
             request_payload.tags,
             request_payload.generate_id,
+            bucket,             # minio attribute
+            obj_path,           # minio attribute
+            version_id,  # minio attribute
             operator=request_payload.operator,
             process_pipeline=request_payload.process_pipeline,
             from_parents=request_payload.from_parents,
@@ -395,11 +449,28 @@ def finalize_worker(logger,
         # get created entity
         created_entity = res_create_meta["result"]
 
+        # Store zip file preview in postgres
+        try:
+            file_type = os.path.splitext(file_path)[1]
+            if file_type == ".zip":
+                archive_preview = generate_archive_preview(file_path)
+                payload = {
+                    "archive_preview": archive_preview,
+                    "file_geid": created_entity["global_entity_id"],
+                }
+                response = requests.post(ConfigClass.DATA_OPS_GR + "archive", json=payload)
+        except Exception as e:
+            geid = created_entity["global_entity_id"]
+            logger.info(f'Error adding file preview for {geid}: {str(e)}')
+
+        
+        # update full path to Greenroom/<display_path>
+        obj_path = ("VRECore/" if namespace == "vrecore" else "Greenroom/") + obj_path
         # add upload logs
         update_file_operation_logs(
             request_payload.operator,
             request_payload.operator,
-            target_file_full_path,
+            obj_path, 
             request_payload.resumable_total_size,
             request_payload.project_code,
             request_payload.generate_id,
@@ -415,7 +486,7 @@ def finalize_worker(logger,
         payload = {
             "event_type": "data_uploaded",
             "payload": {
-                "input_path": target_file_full_path,
+                "input_path": minio_location, # update to minio
                 "project": request_payload.project_code,
                 "generate_id": request_payload.generate_id,
                 "uploader": request_payload.operator,
@@ -462,44 +533,84 @@ def get_root_folder(folder_path):
         return get_root_folder(parent_folder)
 
 
-def get_conflict_folder_paths(data, raw_folder_path, current_folder_node, incremental):
+def get_conflict_folder_paths(data, project_code, current_folder_node, incremental):
     '''
     return conflict folder paths
     '''
-    conflict_folder_paths = []
+    namespace = os.environ.get('namespace')
+
+    # to speed up the loop -> change the array to set
+    # to remove the duplicate folder name check
+    folder_set = set()
     for upload_data in data:
         # check folder name
-        target_folder = current_folder_node if current_folder_node \
+        dp = current_folder_node if current_folder_node \
             else get_root_folder(upload_data.resumable_relative_path)
-        target_folder_full_path = os.path.join(raw_folder_path, target_folder)
-        exists_condition = os.path.isfile(target_folder_full_path) if incremental \
-            else os.path.exists(target_folder_full_path)
-        if target_folder and exists_condition:
+        folder_set.add(dp)
+
+    conflict_folder_paths = []
+    for display_path in folder_set:
+        payload = {
+            'display_path': display_path,
+            'project_code': project_code,
+            'archived': False
+        }
+        # also check if it is in greeroom or core
+        neo4j_zone_label = "VRECore" if namespace == "vre" else "Greenroom"
+        node_query_url = ConfigClass.NEO4J_SERVICE + "nodes/%s/query"%neo4j_zone_label
+        response = requests.post(node_query_url, json=payload)
+        if len(response.json()) > 0:
             conflict_folder_paths.append({
-                "name": os.path.basename(target_folder),
-                "relative_path": os.path.dirname(target_folder),
+                "name": display_path,
+                "relative_path": upload_data.resumable_relative_path,
                 "type": "Folder"
             })
+
             break
     return conflict_folder_paths
 
 
-def get_conflict_file_paths(data, raw_folder_path):
+def get_conflict_file_paths(data, project_code):
     '''
     return conflict file path
     '''
+    namespace = os.environ.get('namespace')
     conflict_file_paths = []
     for upload_data in data:
-        file_full_path = os.path.join(
-            raw_folder_path, upload_data.resumable_relative_path,
-            upload_data.resumable_filename)
-        if os.path.exists(file_full_path):
+        # file_full_path = os.path.join(
+        #     file_path, upload_data.resumable_relative_path,
+        #     upload_data.resumable_filename)
+        # if os.path.exists(file_full_path):
+        #     conflict_file_paths.append({
+        #         "name": upload_data.resumable_filename,
+        #         "relative_path": upload_data.resumable_relative_path,
+        #         "type": "File"
+        #     })
+
+        # now we have to use the neo4j to check duplicate
+        display_path = upload_data.resumable_relative_path+'/'+upload_data.resumable_filename
+        payload = {
+            'display_path': display_path,
+            'project_code': project_code,
+            'archived': False
+        }
+        # also check if it is in greeroom or core
+        neo4j_zone_label = "VRECore" if namespace == "vre" else "Greenroom"
+        node_query_url = ConfigClass.NEO4J_SERVICE + "nodes/%s/query"%neo4j_zone_label
+        response = requests.post(node_query_url, json=payload)
+        
+        if len(response.json()) > 0:
             conflict_file_paths.append({
                 "name": upload_data.resumable_filename,
                 "relative_path": upload_data.resumable_relative_path,
                 "type": "File"
             })
+
+
     return conflict_file_paths
+
+
+
 
 
 def response_conflic_folder_file_names(_res, conflict_file_paths, conflict_folder_paths):

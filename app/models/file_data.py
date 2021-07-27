@@ -12,8 +12,9 @@ class SrvFileDataMgr():
         self.logger = logger
 
     def create(self, uploader, file_name, path,
-               file_size, desc, namespace, project_code, labels,
-               generate_id, operator=None, from_parents=None,
+               file_size, desc, namespace, project_code, labels, 
+               generate_id, minio_bucket, minio_object_path, version_id, 
+               operator=None, from_parents=None,
                process_pipeline=None, parent_folder_geid=None):
         '''
         Create File Data Entity V2
@@ -29,7 +30,11 @@ class SrvFileDataMgr():
             "project_code": project_code,
             "labels": labels,
             "generate_id": generate_id,
-            "parent_folder_geid": parent_folder_geid if parent_folder_geid else ""
+            "parent_folder_geid": parent_folder_geid if parent_folder_geid else "",
+            # minio attribute
+            "bucket": minio_bucket,
+            "minio_object_path": minio_object_path,
+            "version_id": version_id
         }
         self.logger.debug('SrvFileDataMgr post_json_form' +
                           str(post_json_form))
@@ -47,6 +52,7 @@ class SrvFileDataMgr():
             error_info = {
                 "error": "create meta failed",
                 "errorcode": res.status_code,
-                "errorpayload": post_json_form
+                "errorpayload": post_json_form,
+                "error_message": res.text
             }
             return error_info

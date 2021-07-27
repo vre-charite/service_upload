@@ -17,6 +17,14 @@ class ConfigClass(object):
     PROVENANCE_SERVICE = "http://provenance.utility:5077/v1/"
     UTILITY_SERVICE = "http://common.utility:5062/v1/"
 
+    # minio config
+    MINIO_OPENID_CLIENT = "react-app"
+    MINIO_ENDPOINT = "minio.minio:9000"
+    MINIO_HTTPS = False
+    KEYCLOAK_URL = "http://keycloak.utility:8080"
+    MINIO_ACCESS_KEY = "indoc-minio"
+    MINIO_SECRET_KEY = "Trillian42!"
+
     if env == "test":
         NEO4J_SERVICE = "http://10.3.7.216:5062/v1/neo4j/"
         NEO4J_SERVICE_V2 = "http://10.3.7.216:5062/v2/neo4j/"
@@ -24,6 +32,25 @@ class ConfigClass(object):
         DATA_UTILITY_SERVICE = "http://10.3.7.239:5063/v1/"
         PROVENANCE_SERVICE = "http://10.3.7.202:5077/v1/"
         UTILITY_SERVICE = "http://10.3.7.222:5062/v1/"
+
+        # minio config
+        MINIO_ENDPOINT = "10.3.7.220"
+        MINIO_HTTPS = False
+        KEYCLOAK_URL = "http://10.3.7.220" # for local test ONLY
+
+
+    # MINIO_OPENID_CLIENT = "react-app"
+    # if env == "staging":
+    #     MINIO_ENDPOINT = "minio.minio:9000"
+    #     MINIO_HTTPS = False
+    #     KEYCLOAK_URL = "http://10.3.7.240:80"
+    #     MINIO_TEST_PASS = "IndocStaging2021!"
+    # else:
+    #     MINIO_ENDPOINT = "10.3.7.220"
+    #     MINIO_HTTPS = False
+    #     KEYCLOAK_URL = "http://keycloak.utility:8080"
+    #     KEYCLOAK_URL = "http://10.3.7.220" # for local test ONLY
+    #     MINIO_TEST_PASS = "admin"
 
     # disk mounts
     ROOT_PATH = {

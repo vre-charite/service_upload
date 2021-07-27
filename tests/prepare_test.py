@@ -23,8 +23,8 @@ class SetupTest:
     def create_project(self, code, discoverable='true'):
         self.log.info("\n")
         self.log.info("Preparing testing project".ljust(80, '-'))
-        testing_api = ConfigClass.NEO4J_SERVICE + "nodes/Dataset"
-        params = {"name": "EntityInfoUnitTest",
+        testing_api = ConfigClass.NEO4J_SERVICE + "nodes/Container"
+        params = {"name": "UploadUnitTest",
                   "path": code,
                   "code": code,
                   "description": "Project created by unit test, will be deleted soon...",
@@ -37,19 +37,19 @@ class SetupTest:
         self.log.info(f"POST params: {params}")
         try:
             res = requests.post(testing_api, json=params)
-            self.log.info(f"RESPONSE DATA: {res.text}")
-            self.log.info(f"RESPONSE STATUS: {res.status_code}")
+            self.log.info(f"RESPONSE PROJECT CREATION DATA: {res.text}")
+            self.log.info(f"RESPONSE PROJECT CREATION STATUS: {res.status_code}")
             assert res.status_code == 200
             node = res.json()[0]
             return node
         except Exception as e:
-            self.log.info(f"ERROR CREATING PROJECT: {e}")
+            self.log.error(f"ERROR CREATING PROJECT: {e}")
             raise e
 
     def delete_project(self, node_id):
         self.log.info("\n")
         self.log.info("Preparing delete project".ljust(80, '-'))
-        delete_api = ConfigClass.NEO4J_SERVICE + "nodes/Dataset/node/%s" % str(node_id)
+        delete_api = ConfigClass.NEO4J_SERVICE + "nodes/Container/node/%s" % str(node_id)
         try:
             self.log.info(f"DELETE Project: {node_id}")
             delete_res = requests.delete(delete_api)

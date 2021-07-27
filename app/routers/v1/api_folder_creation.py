@@ -11,6 +11,7 @@ from ...models.models_upload import CreateFolderPOST, CreateFolderPOSTResponse
 from ...resources.error_handler import catch_internal, EAPIResponseCode, \
     ECustomizedError, customized_error_template
 from ...resources.helpers import get_geid
+import time
 
 router = APIRouter()
 
@@ -52,7 +53,7 @@ class APIFolderCreation:
             return _res.json_response()
         project_code = request_payload.project_code
         zone = request_payload.zone
-        raw_folder_path = get_raw_folder_path(project_code, zone)
+        raw_folder_path = "get_raw_folder_path(project_code, zone)"
 
         destination_geid = request_payload.destination_geid
         global_entity_id = get_geid()
@@ -68,15 +69,48 @@ class APIFolderCreation:
                 destination_geid = request_payload.destination_geid
                 respon_query = get_from_db(destination_geid)
                 if respon_query.status_code != 200:
-                    _logger.error(f"Error while fetching details from db : {respon_query.text}")
-                    raise HTTPException(status_code=500, detail=f"Error while creating folder")
+                    _logger.error(
+                        f"Error while fetching details from db : {respon_query.text}")
+                    raise HTTPException(
+                        status_code=500, detail=f"Error while creating folder")
                 if respon_query.status_code == 200 and len(respon_query.json()) != 0:
                     respon_query = respon_query.json()
                     folder_parent_geid = respon_query[0]['global_entity_id']
                     folder_parent_name = respon_query[0]['name']
-                    folder_relative_path = os.path.join(respon_query[0]['folder_relative_path'], folder_parent_name)
-                    folder_full_path = os.path.join(raw_folder_path, folder_relative_path, folder_name)
+                    folder_relative_path = os.path.join(
+                        respon_query[0]['folder_relative_path'], folder_parent_name)
+                    folder_full_path = os.path.join(
+                        raw_folder_path, folder_relative_path, folder_name)
                     folder_level = len(folder_relative_path.split("/"))
+
+            # check if the project exist
+            project_query_url = ConfigClass.NEO4J_SERVICE+"nodes/Container/query"
+            payload = {
+                'code': project_code
+            }
+            response = requests.post(project_query_url, json=payload)
+            if len(response.json()) == 0:
+                _logger.error(f"project {project_code} does not exist")
+                return project_does_not_exist(_res, project_code)
+
+            # now we have to use the neo4j to check duplicate
+            display_path = folder_relative_path+'/' + \
+                folder_name if folder_relative_path else folder_name
+            payload = {
+                'display_path': display_path,
+                'project_code': project_code,
+            }
+            # also check if it is in greeroom or core
+            neo4j_zone_label = "VRECore" if zone == "vrecore" else "Greenroom"
+            node_query_url = ConfigClass.NEO4J_SERVICE + "nodes/%s/query" % neo4j_zone_label
+            response = requests.post(node_query_url, json=payload)
+            # print(response.json())
+            if len(response.json()) > 0:
+                _logger.error(
+                    f"Folder with name {folder_name} already exists in the destination {display_path}")
+                return folder_name_conflict(_res, folder_name, display_path)
+
+            # formulate the folder metadata
             query = {
                 'global_entity_id': global_entity_id,
                 'folder_name': folder_name,
@@ -88,20 +122,33 @@ class APIFolderCreation:
                 'zone': zone,
                 'project_code': project_code,
                 'folder_tags': request_payload.tags,
+                'extra_attrs': {
+                    'display_path': display_path,
+                },
             }
 
-            try:
-                os.makedirs(folder_full_path)
-                query_response = create_folder_node(query_params=query)
+            ########################################################
+            # Since we move to minio so deprecate the nfs folder
+            # there is no folder concept in minio so we just use
+            # the neo4j for display purpose
+            ########################################################
+            # try:
+            #     os.makedirs(folder_full_path)
+            #     query_response = create_folder_node(query_params=query)
 
-                return query_response
+            #     return query_response
 
-            except FileExistsError as error:
-                _logger.error(f"Folder with name {folder_name} already exists in the destination {folder_full_path}")
-                return folder_name_conflict(_res, folder_name, folder_full_path)
+            # except FileExistsError as error:
+            #     _logger.error(f"Folder with name {folder_name} already exists in the destination {folder_full_path}")
+            #     return folder_name_conflict(_res, folder_name, folder_full_path)
+
+            query_response = create_folder_node(query_params=query)
+            return query_response
+
         except Exception as error:
             _logger.error(f"Error while creating folder {error}")
-            raise HTTPException(status_code=500, detail=f"Error while creating folder {error}")
+            raise HTTPException(
+                status_code=500, detail=f"Error while creating folder {error}")
 
 
 def create_folder_node(query_params) -> object:
@@ -110,12 +157,14 @@ def create_folder_node(query_params) -> object:
         **query_params
     }
     create_url = ConfigClass.ENTITYINFO_SERVICE + "folders"
+    _logger.info("create folder request payload: {}".format(payload))
     respon = requests.post(create_url, json=payload)
     if respon.status_code == 200:
         return respon.json()
     else:
         _logger.error(f"Error while creating folder node : {respon.text}")
-        raise HTTPException(status_code=500, detail=f"Error while creating folder")
+        raise HTTPException(
+            status_code=500, detail=f"Error while creating folder")
 
 
 # if FE passes relative_path
@@ -144,6 +193,19 @@ def folder_name_conflict(_res, folder_name, folder_full_path):
     return _res.json_response()
 
 
+def project_does_not_exist(_res, code):
+    '''
+    return conflict file path
+    '''
+
+    _res.code = EAPIResponseCode.bad_request
+    _res.error_msg = f"project {code} does not exist"
+    _res.result = {
+        "failed": f"project {code} does not exist"
+    }
+    return _res.json_response()
+
+
 def get_raw_folder_path(project_code, zone):
     # (optional) check if the folder is not existed
     raw_folder_path = os.path.join(
@@ -151,8 +213,12 @@ def get_raw_folder_path(project_code, zone):
     if zone == "vrecore":
         raw_folder_path = os.path.join(raw_folder_path)
     elif zone == "greenroom":
-        raw_folder_path = os.path.join(raw_folder_path, "raw")
+        # we decide to remove the raw folder for now it will upload
+        # to the /project_code/
+        # raw_folder_path = os.path.join(raw_folder_path, "raw")
+        raw_folder_path = os.path.join(raw_folder_path)
         # os.makedirs(raw_folder_path)
+
     # check raw folder path valid
     if not os.path.isdir(raw_folder_path):
         raise (Exception('Folder raw does not existed: %s' %
