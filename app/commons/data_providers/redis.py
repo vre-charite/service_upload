@@ -5,10 +5,9 @@ from ..logger_services.logger_factory_service import SrvLoggerFactory
 
 _logger = SrvLoggerFactory('SrvRedisSingleton').get_logger()
 
+REDIS_INSTANCE = {}
 
 class SrvRedisSingleton():
-
-    __instance = {}
 
     def __init__(self):
         self.host = ConfigClass.REDIS_HOST
@@ -18,13 +17,21 @@ class SrvRedisSingleton():
         self.connect()
 
     def connect(self):
-        if self.__instance:
+        global REDIS_INSTANCE
+        if REDIS_INSTANCE:
+            self.__instance = REDIS_INSTANCE
+            # _logger.info("[SUCCEED] SrvRedisSingleton Connection found, no need for connecting")
             pass
         else:
-            self.__instance = StrictRedis(host=self.host,
+            REDIS_INSTANCE = StrictRedis(host=self.host,
                                           port=self.port,
                                           db=self.db,
                                           password=self.pwd)
+            self.__instance = REDIS_INSTANCE
+            _logger.info("[SUCCEED] SrvRedisSingleton Connection initialized.")
+
+    def get_pipeline(self):
+        return self.__instance.pipeline()
 
     def get_by_key(self, key: str):
         return self.__instance.get(key)

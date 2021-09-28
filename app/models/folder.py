@@ -22,6 +22,8 @@ class FolderMgr:
         self.relative_path = relative_path
         self.folder_tags = folder_tags
         self.last_node = None
+        self.to_create = []
+        self.relations_data = []
 
     def create(self, creator):
         '''
@@ -29,6 +31,7 @@ class FolderMgr:
         '''
         try:
             os.makedirs(os.path.join(self.raw_folder_path, self.relative_path))
+            pass
         except FileExistsError:
             pass
             # _file_mgr_logger.error("Folder name already been taken: {}/{}"
@@ -37,7 +40,10 @@ class FolderMgr:
             #                       .format(self.raw_folder_path, self.relative_path))
         except Exception as exce:
             raise
-        self.create_nodes(creator)
+        try:
+            self.create_nodes(creator)
+        except:
+            raise
 
     def create_nodes(self, creator):
         '''
@@ -67,10 +73,22 @@ class FolderMgr:
                         new_node.folder_parent_geid = parent_node.global_entity_id
                         new_node.folder_parent_name = parent_node.folder_name
                     # create in db if not exist
-                    new_node.save()
+                    # new_node.save()
+                    lazy_save = new_node.lazy_save()
+                    self.to_create.append(lazy_save)
+                    if lazy_save["folder_parent_geid"]:
+                        self.relations_data.append({
+                            "start_params": {
+                                "global_entity_id": lazy_save["folder_parent_geid"]
+                            },
+                            "end_params": {
+                                "global_entity_id": lazy_save["global_entity_id"]
+                            }
+                        })
                     self.cache.append(new_node)
                 node_chain.append(new_node)
                 self.last_node = new_node
+
             return self.cache
         except Exception as exce:
             raise
@@ -81,8 +99,9 @@ class FolderNode:
     Folder Node Model
     '''
 
-    def __init__(self, project_code, folder_name, folder_relative_path, creator, cache=[]):
+    def __init__(self, project_code, folder_name, folder_relative_path, creator, cache: list =[]):
         self.exist = False
+        self.cache = cache
         self.__attribute_map = {
             'global_entity_id': None,
             'folder_name': folder_name,
@@ -152,6 +171,8 @@ class FolderNode:
                     'folder_tags': found[0]["tags"],
                 }
                 self.exist = True
+                self.cache.append(self)
+                self.cache = list(set(self.cache))
         return self.exist
 
     def save(self, override=False):
@@ -176,10 +197,31 @@ class FolderNode:
         }
         create_url = ConfigClass.ENTITYINFO_SERVICE + "folders"
         respon = requests.post(create_url, json=payload)
+        folder_full_path = os.path.join(self.folder_relative_path, self.folder_name)
         if respon.status_code == 200:
+            _file_mgr_logger.info(
+                    "[INFO] Folder node saved: {}".format(folder_full_path))
             pass
         else:
+            _file_mgr_logger.error(
+                    "[ERROR] Folder node saved failed: {}".format(folder_full_path))
             raise(Exception(str(respon.status_code) + " " + respon.text))
+
+    def lazy_save(self):
+        self.__set_geid(get_geid())
+        payload = {
+            "global_entity_id": self.global_entity_id,
+            "folder_name": self.folder_name,
+            "folder_level": self.folder_level,
+            "folder_parent_geid": self.folder_parent_geid,
+            "folder_parent_name": self.folder_parent_name,
+            "uploader": self.folder_creator,
+            "folder_relative_path": self.folder_relative_path,
+            "zone": self.zone,
+            "project_code": self.project_code,
+            "folder_tags": self.folder_tags
+        }
+        return payload
 
     def to_dict(self):
         return self.__attribute_map
@@ -289,3 +331,32 @@ def http_query_node_zone(namespace, query_params={}):
     node_query_url = ConfigClass.NEO4J_SERVICE_V2 + "nodes/query"
     response = requests.post(node_query_url, json=payload)
     return response
+
+
+def batch_create_4j_foldernodes(folders, zone, link_container=False):
+    url = ConfigClass.ENTITYINFO_SERVICE + "folders/batch"
+    batch_create_payload = {
+        "payload": folders,
+        "zone": zone,
+        "link_container": link_container
+    }
+    saved = requests.post(url, json=batch_create_payload)
+    return saved
+
+
+def batch_link_folders(relations):
+    # bulk create relations
+    data = {
+        "payload": relations,
+        "pamras_location": ['start', 'end'],
+        "start_label": "Folder",
+        "end_label": 'Folder'
+    }
+    response = requests.post(ConfigClass.NEO4J_SERVICE +
+                             "relations/own/batch", json=data)
+    if response.status_code // 100 == 2:
+        return response
+    else:
+        raise(Exception("[bulk_link_project Error] {} {}".format(
+            response.status_code, response.text)))
+

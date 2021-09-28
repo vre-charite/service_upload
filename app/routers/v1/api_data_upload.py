@@ -6,18 +6,23 @@ import requests
 from typing import List
 from fastapi import APIRouter, BackgroundTasks, Header, File, UploadFile, Form
 from fastapi_utils import cbv
+from typing import Optional
+
 from ...models.base_models import APIResponse, EAPIResponseCode
 from ...models.models_upload import PreUploadResponse, PreUploadPOST,\
     EUploadJobType, ChunkUploadPOST, ChunkUploadResponse, OnSuccessUploadPOST, \
     GETJobStatusResponse, POSTCombineChunksResponse, SingleFileForm
 from ...models.fsm_file_upload import EState, FsmMgrUpload
+
 from ...commons.logger_services.logger_factory_service import SrvLoggerFactory
-from ...commons.data_providers import session_job_get_status
-from ...commons.service_connection.minio_client import Minio_Client
+from ...commons.data_providers import session_job_get_status, SrvRedisSingleton
+from ...commons.service_connection.minio_client import Minio_Client, Minio_Client_
+
 from ...resources.error_handler import catch_internal, ECustomizedError, customized_error_template
 from ...resources.helpers import update_file_operation_logs, get_geid, get_project, send_to_queue, \
     delete_by_session_id, generate_archive_preview
-from ...models.folder import FolderMgr, FolderNode
+
+from ...models.folder import FolderMgr, FolderNode, batch_create_4j_foldernodes, batch_link_folders
 from ...models.file_data import SrvFileDataMgr
 from ...models.tag import SrvTagsMgr
 from ...config import ConfigClass
@@ -49,6 +54,12 @@ class APIUpload:
         # init resp
         _res = APIResponse()
         job_list = []
+        redis_srv = SrvRedisSingleton()
+        redis_pipeline = redis_srv.get_pipeline()
+        to_create_folders = []
+        folder_relations = []
+        conflict_file_paths = []
+        conflict_folder_paths = []
         if not session_id:
             _res.code = EAPIResponseCode.bad_request
             _res.result = {}
@@ -62,7 +73,7 @@ class APIUpload:
             if not project_info:
                 _res.code = EAPIResponseCode.not_found
                 _res.result = {}
-                _res.error_msg = "Dataset not found"
+                _res.error_msg = "Container or Dataset not found"
                 return _res.json_response()
             raw_folder_path = get_raw_folder_path(request_payload.project_code)
             created_folders_cache: List[FolderNode] = []
@@ -75,21 +86,45 @@ class APIUpload:
                     else upload_data.resumable_filename
 
             # handle filename conflicts
-            conflict_file_paths = get_conflict_file_paths(
-                request_payload.data, request_payload.project_code)
-            # also check the folder confilct. Note we might have the situation
-            # that folder is same name but with different files
-            conflict_folder_paths = get_conflict_folder_paths(
-                request_payload.data, request_payload.project_code, request_payload.current_folder_node,
-                request_payload.incremental) if request_payload.job_type == EUploadJobType.AS_FOLDER.name \
-                else []
+            if request_payload.do_conflict_check:
+                if request_payload.job_type == EUploadJobType.AS_FILE.name:
+                    conflict_file_paths = get_conflict_file_paths(
+                        request_payload.data, request_payload.project_code)
+                # also check the folder confilct. Note we might have the situation
+                # that folder is same name but with different files
+                if request_payload.job_type == EUploadJobType.AS_FOLDER.name:
+                    conflict_folder_paths = get_conflict_folder_paths(
+                        request_payload.data, request_payload.project_code, request_payload.current_folder_node,
+                        request_payload.incremental) if request_payload.job_type == EUploadJobType.AS_FOLDER.name \
+                        else []
+                if len(conflict_file_paths) > 0 or len(conflict_folder_paths) > 0:
+                    return response_conflic_folder_file_names(
+                        _res, conflict_file_paths, conflict_folder_paths
+                    )
 
-            if len(conflict_file_paths) > 0 or len(conflict_folder_paths) > 0:
-                return response_conflic_folder_file_names(
-                    _res, conflict_file_paths, conflict_folder_paths
-                )
+            namespace = {
+                "vre": "vrecore",
+                "greenroom": "greenroom"
+            }.get(
+                os.environ.get('namespace')
+            )
 
             for upload_data in request_payload.data:
+                # add lock
+                bucket = ("core-" if namespace == "vrecore" else "gr-") + request_payload.project_code
+                lock_key = os.path.join(bucket,
+                    upload_data.resumable_relative_path,
+                    upload_data.resumable_filename)
+                res_check_lock = check_lock(lock_key)
+                if res_check_lock.status_code == 200:
+                    lock_status = res_check_lock.json()['result']['status']
+                    if lock_status == 'LOCKED':
+                        _res.code = EAPIResponseCode.bad_request
+                        _res.error_msg = "Invalid operation, locked: {}".format(
+                            lock_key)
+                        return _res.json_response()
+                lock_resource(lock_key)
+                self.__logger.info("[INFO] lock added for: {}".format(lock_key))
                 # create folder and folder nodes
                 folder_mgr = FolderMgr(
                     created_folders_cache,
@@ -100,21 +135,26 @@ class APIUpload:
                     request_payload.folder_tags)
                 try:
                     folder_mgr.create(request_payload.operator)
+                    to_create_folders += folder_mgr.to_create
+                    folder_relations += folder_mgr.relations_data
                 except FileExistsError as file_exist_error:
                     _res.code = EAPIResponseCode.conflict
                     _res.error_msg = str(file_exist_error)
                     return _res.json_response()
+                except Exception as other_error:
+                    self.__logger.error(str(other_error))
+                    raise
                 last_folder_node_geid = folder_mgr.last_node.global_entity_id \
                     if folder_mgr.last_node else None
+                self.__logger.info("[INFO] Folders created: {}".format(lock_key))
                 # get job geid
                 resumable_identifier = get_geid()
+                self.__logger.info("[INFO] Fetched geid for: {}".format(lock_key))
                 temp_dir = get_temp_dir(resumable_identifier)
-                file_full_path = os.path.join(
-                    raw_folder_path, upload_data.resumable_relative_path,
-                    upload_data.resumable_filename)
                 relative_full_path = os.path.join(
                     upload_data.resumable_relative_path,
                     upload_data.resumable_filename)
+                self.__logger.info("[INFO] path calculated for: {}".format(lock_key))
                 # init empty status manager
                 status_mgr = FsmMgrUpload(
                     session_id,
@@ -131,21 +171,37 @@ class APIUpload:
                     "resumable_identifier", resumable_identifier)
                 status_mgr.add_payload(
                     "parent_folder_geid", last_folder_node_geid)
+                self.__logger.info("[INFO] Job created: {}".format(lock_key))
                 try:
-                    status_mgr.go(EState.INIT)
                     # create temp dir
                     if not os.path.isdir(temp_dir):
                         os.makedirs(temp_dir)
                     # set preuploaded status
-                    job_recorded = status_mgr.go(EState.PRE_UPLOADED)
+                    status_mgr.set_status(EState.PRE_UPLOADED.name)
+                    job_key, job_value, job_recorded = status_mgr.get_kv_entity()
+                    redis_pipeline.set(job_key, job_value)
                     job_list.append(job_recorded)
+                    self.__logger.info("[INFO] Job status changed: {}".format(lock_key))
                 except Exception as exce:
                     # catch internal error
                     status_mgr.add_payload("error_msg", str(exce))
-                    status_mgr.go(EState.TERMINATED)
+                    status_mgr.set_status(EState.TERMINATED.name)
+                    self.__logger.error("[INFO] Job failed: {}".format(lock_key))
                     raise exce
+                self.__logger.info("[SUCCEED] All tasks done for: {}".format(lock_key))
+            # batch create folder nodes
+            if len(to_create_folders) > 0:
+                first_node = to_create_folders[0]
+                zone = first_node["zone"]
+                res = batch_create_4j_foldernodes(to_create_folders, zone)
+                self.__logger.info("[SUCCEED] Neo4j Folders create result: {}".format(res.text))
+                relations_saved = batch_link_folders(folder_relations)
+                self.__logger.info("[SUCCEED] Neo4j Folders relations result: {}".format(relations_saved.text))
+            self.__logger.info("[SUCCEED] Neo4j Folders saved: {}".format(len(to_create_folders)))
+            redis_pipeline.execute()
             _res.code = EAPIResponseCode.success
             _res.result = job_list
+            self.__logger.info("[SUCCEED] Done")
             return _res.json_response()
         else:
             _res.code = EAPIResponseCode.bad_request
@@ -262,12 +318,15 @@ class APIUpload:
     @catch_internal(_API_NAMESPACE)
     async def on_success(self, request_payload: OnSuccessUploadPOST,
                          background_tasks: BackgroundTasks,
-                         session_id: str = Header(None)):
+                         session_id: str = Header(None), 
+                         Authorization: Optional[str] = Header(None), 
+                         refresh_token: Optional[str] = Header(None)):
         '''
         This method allow to create a background worker to combine chunks uploaded
         '''
         # init resp
         _res = APIResponse()
+        access_token = Authorization
         if not session_id:
             _res.code = EAPIResponseCode.bad_request
             _res.result = {}
@@ -307,7 +366,8 @@ class APIUpload:
 
         # add backgroud task to combine all recieved chunks
         background_tasks.add_task(finalize_worker, self.__logger, request_payload,
-                                  status_mgr, chunk_paths, file_full_path, temp_dir)
+                                  status_mgr, chunk_paths, file_full_path, temp_dir,
+                                  access_token, refresh_token)
         # set merging status
         job_recorded = status_mgr.go(EState.CHUNK_UPLOADED)
         _res.code = EAPIResponseCode.success
@@ -363,10 +423,12 @@ def finalize_worker(logger,
                     status_mgr: FsmMgrUpload,
                     chunk_paths: list,
                     target_file_full_path,
-                    temp_dir):
+                    temp_dir, access_token, 
+                    refresh_token):
     '''
     async zip worker
     '''
+    lock_key = 'default'
     try:
         # Upload task to combine file chunks and upload to nfs
         namespace = {
@@ -408,9 +470,11 @@ def finalize_worker(logger,
         # after use the minio the generate pipeline will also use the minio location
         minio_http = ("https://" if ConfigClass.MINIO_HTTPS else "http://") + ConfigClass.MINIO_ENDPOINT
         minio_location = "minio://%s/%s/%s"%(minio_http, bucket, obj_path)
+        # get lock key
+        lock_key = os.path.join(bucket, obj_path)
         # minio_location = minio_location.encode('utf-8')
         try:
-            mc = Minio_Client()
+            mc = Minio_Client_(access_token, refresh_token)
             logger.info("Minio Connection Success")
 
             result = mc.client.fput_object(
@@ -420,6 +484,7 @@ def finalize_worker(logger,
             logger.info("Minio Upload Success")
         except Exception as e:
             logger.error("error when uploading: "+str(e))
+            unlock_resource(lock_key)
 
         # create entity file data
         file_meta_mgr = SrvFileDataMgr(logger)
@@ -462,6 +527,7 @@ def finalize_worker(logger,
         except Exception as e:
             geid = created_entity["global_entity_id"]
             logger.info(f'Error adding file preview for {geid}: {str(e)}')
+            unlock_resource(lock_key)
 
         
         # update full path to Greenroom/<display_path>
@@ -490,7 +556,10 @@ def finalize_worker(logger,
                 "project": request_payload.project_code,
                 "generate_id": request_payload.generate_id,
                 "uploader": request_payload.operator,
-                "source_geid": created_entity["global_entity_id"]
+                "source_geid": created_entity["global_entity_id"],
+                # new here the token will also pass to queue if 
+                # the project is generate for pipeline
+                "auth_token": {"at":access_token, "rt":refresh_token},
             },
             "create_timestamp": time.time()
         }
@@ -502,23 +571,28 @@ def finalize_worker(logger,
             shutil.rmtree(temp_dir)
         except Exception as exce:
             logger.info("Upload on succeed rmtree error: " + str(exce))
+            unlock_resource(lock_key)
         try:
             status_mgr.add_payload(
                 "source_geid",  created_entity["global_entity_id"])
             status_mgr.go(EState.SUCCEED)
         except Exception as exce:
             logger.info("Upload on succeed set status as succeed error: " + str(exce))
+            unlock_resource(lock_key)
         logger.info('Upload Job Done.')
+        unlock_resource(lock_key)
 
     except FileNotFoundError:
         error_msg = 'folder {} is already empty'.format(temp_dir)
         logger.warning(error_msg)
+        unlock_resource(lock_key)
 
     except Exception as exce:
         # catch internal error
         logger.error(str(exce))
         status_mgr.set_payload({"error_msg": str(exce)})
         status_mgr.go(EState.TERMINATED)
+        unlock_resource(lock_key)
         raise exce
 
 
@@ -611,8 +685,6 @@ def get_conflict_file_paths(data, project_code):
 
 
 
-
-
 def response_conflic_folder_file_names(_res, conflict_file_paths, conflict_folder_paths):
     '''
     set conflict response when filename or folder name conflics
@@ -635,3 +707,36 @@ def response_conflic_folder_file_names(_res, conflict_file_paths, conflict_folde
             "failed": conflict_folder_paths
         }
         return _res.json_response()
+
+def lock_resource(resource_key):
+    '''
+    lock resource
+    '''
+    url = ConfigClass.DATA_OPS_UTIL + 'resource/lock'
+    post_json = {
+        "resource_key": resource_key
+    }
+    response = requests.post(url, json=post_json)
+    return response
+
+def check_lock(resource_key):
+    '''
+    get resource lock
+    '''
+    url = ConfigClass.DATA_OPS_UTIL + 'resource/lock'
+    params = {
+        "resource_key": resource_key
+    }
+    response = requests.get(url, params=params)
+    return response
+
+def unlock_resource(resource_key):
+    '''
+    unlock resource
+    '''
+    url = ConfigClass.DATA_OPS_UTIL + 'resource/lock'
+    post_json = {
+        "resource_key": resource_key
+    }
+    response = requests.delete(url, json=post_json)
+    return response

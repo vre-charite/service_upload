@@ -51,6 +51,16 @@ def get_geid():
         raise Exception('{}: {}'.format(response.status_code, url))
 
 
+def bulk_get_geid(number):
+    url = ConfigClass.UTILITY_SERVICE + \
+        "utility/id/batch"
+    response = requests.get(url, params={"number": number})
+    if response.status_code == 200:
+        return response.json()['result']
+    else:
+        raise Exception('{}: {}'.format(response.status_code, url))
+
+
 def delete_by_session_id(session_id: str, job_id: str = "*", action: str = "*"):
     '''
     delete status by session id
@@ -108,7 +118,8 @@ def get_project(project_code):
     data = {
         "code": project_code,
     }
-    response = requests.post(ConfigClass.NEO4J_SERVICE + f"nodes/Container/query", json=data)
+    response = requests.post(
+        ConfigClass.NEO4J_SERVICE + f"nodes/Container/query", json=data)
     result = response.json()
     if not result:
         return result

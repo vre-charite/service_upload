@@ -112,6 +112,29 @@ class SessionJob:
         if fetched:
             raise Exception(
                 '[SessionJob] job id already exists: {}'.format(self.job_id))
+    
+    def get_kv_entity(self):
+        '''
+        get redis key value pair
+        return key, value, job_dict
+        '''
+        my_key = "dataaction:{}:{}:{}:{}:{}:{}".format(
+            self.session_id, self.job_id, self.action, self.project_code,
+                self.operator, self.source)
+        record = {
+            "session_id": self.session_id,
+            "job_id": self.job_id,
+            "source": self.source,
+            "action": self.action,
+            "status": self.status,
+            "project_code": self.project_code,
+            "operator": self.operator,
+            "progress": self.progress,
+            "payload": self.payload,
+            'update_timestamp': str(round(time.time()))
+        }
+        my_value = json.dumps(record)
+        return my_key, my_value, record
 
 
 def session_job_set_status(session_id, job_id, source, action, target_status,

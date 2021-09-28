@@ -7,10 +7,10 @@ from fastapi_utils import cbv
 from ...commons.logger_services.logger_factory_service import SrvLoggerFactory
 from ...config import ConfigClass
 from ...models.base_models import APIResponse
-from ...models.models_upload import CreateFolderPOST, CreateFolderPOSTResponse
+from ...models.models_upload import CreateFolderPOST, CreateFolderPOSTResponse, BulkCreateFolderPOST, BulkCreateFolderPOSTV2
 from ...resources.error_handler import catch_internal, EAPIResponseCode, \
     ECustomizedError, customized_error_template
-from ...resources.helpers import get_geid
+from ...resources.helpers import get_geid, bulk_get_geid
 import time
 
 router = APIRouter()
@@ -19,6 +19,148 @@ _API_TAG = 'V1 Folder creation'
 _API_NAMESPACE = "api_folder_creation"
 
 _logger = SrvLoggerFactory('api_folder_creation').get_logger()
+
+
+@cbv.cbv(router)
+class APIBulkFolderCreationV2:
+    """ API to create folder"""
+
+    def __init__(self):
+        self.__logger = SrvLoggerFactory(
+            'api_bulk_folder_creation').get_logger()
+
+    @router.post("/folder/bulk", tags=[_API_TAG],
+                 summary="This API is to bulk create a folder in the target destination",
+                 response_model=CreateFolderPOSTResponse)
+    @catch_internal(_API_NAMESPACE)
+    async def bulk_create_folder_v2(self, request_payload: BulkCreateFolderPOSTV2):
+        _res = APIResponse()
+
+        zone = request_payload.zone
+        folders = request_payload.folders
+
+        self.__logger.info(
+            f"Bulk create folder v2 payload: {request_payload}")
+
+        folder_level = 0
+        folder_parent_geid = ""
+        folder_parent_name = ""
+        folder_relative_path = ""
+
+        payload = []
+
+        try:
+            geid_list = bulk_get_geid(len(folders))
+            index = 0
+            for folder in folders:
+                folder_name = folder['name'].strip()
+                valid = validate_folder_name(folder_name)
+
+                if len(folder_name) < 1 or len(folder_name) > 20 or valid is not None:
+                    continue
+
+                display_path = folder_relative_path+'/' + \
+                    folder_name if folder_relative_path else folder_name
+
+                global_entity_id = geid_list[index]
+                payload.append({
+                    'global_entity_id': global_entity_id,
+                    'folder_name': folder_name,
+                    'folder_level': folder_level,
+                    'folder_parent_geid': folder_parent_geid,
+                    'folder_parent_name': folder_parent_name,
+                    'uploader': folder['uploader'],
+                    'folder_relative_path': folder_relative_path,
+                    'zone': zone,
+                    'project_code': folder['project_code'],
+                    'folder_tags': folder['tags'],
+                    'extra_attrs': {
+                        'display_path': display_path,
+                    },
+                })
+                index += 1
+
+            self.__logger.info(
+                f"bulk create folder payload of service entityinfo: {payload}")
+            create_response = bulk_create_folder_nodes(payload, zone)
+            self.__logger.info(
+                f"bulk create folder response of service entityinfo: {create_response}")
+            return create_response
+
+        except Exception as error:
+            self.__logger.error(f"Error while bulk creating folder {error}")
+            raise HTTPException(
+                status_code=500, detail=f"Error while bulk creating folder {error}")
+
+
+@cbv.cbv(router)
+class APIBulkFolderCreation:
+    """ API to create folder"""
+
+    def __init__(self):
+        self.__logger = SrvLoggerFactory(
+            'api_bulk_folder_creation').get_logger()
+
+    @router.post("/folder/batch", tags=[_API_TAG],
+                 summary="This API is to bulk create a folder in the target destination",
+                 response_model=CreateFolderPOSTResponse)
+    @catch_internal(_API_NAMESPACE)
+    async def bulk_create_folder(self, request_payload: BulkCreateFolderPOST):
+        _res = APIResponse()
+
+        folder_name = request_payload.folder_name.strip()
+        valid = validate_folder_name(folder_name)
+
+        if len(folder_name) < 1 or len(folder_name) > 20 or valid is not None:
+            _res.code = EAPIResponseCode.bad_request
+            _res.error_msg = customized_error_template(
+                ECustomizedError.INVALID_FOLDER_NAME_TYPE)
+            _res.result = {
+                "failed": "Folder should not contain : (\/:?*<>|”') and must contain 1 to 20 characters"
+            }
+            return _res.json_response()
+        project_code_list = request_payload.project_code_list
+        zone = request_payload.zone
+
+        folder_level = 0
+        folder_parent_geid = ""
+        folder_parent_name = ""
+        folder_relative_path = ""
+
+        payload = []
+
+        display_path = folder_relative_path+'/' + \
+            folder_name if folder_relative_path else folder_name
+
+        try:
+            geid_list = bulk_get_geid(len(project_code_list))
+            index = 0
+            for project_code in project_code_list:
+                global_entity_id = geid_list[index]
+                payload.append({
+                    'global_entity_id': global_entity_id,
+                    'folder_name': folder_name,
+                    'folder_level': folder_level,
+                    'folder_parent_geid': folder_parent_geid,
+                    'folder_parent_name': folder_parent_name,
+                    'uploader': request_payload.uploader,
+                    'folder_relative_path': folder_relative_path,
+                    'zone': zone,
+                    'project_code': project_code,
+                    'folder_tags': request_payload.tags,
+                    'extra_attrs': {
+                        'display_path': display_path,
+                    },
+                })
+                index += 1
+
+            create_response = bulk_create_folder_nodes(payload, zone)
+            return create_response
+
+        except Exception as error:
+            _logger.error(f"Error while bulk creating folder {error}")
+            raise HTTPException(
+                status_code=500, detail=f"Error while bulk creating folder {error}")
 
 
 @cbv.cbv(router)
@@ -163,6 +305,22 @@ def create_folder_node(query_params) -> object:
         return respon.json()
     else:
         _logger.error(f"Error while creating folder node : {respon.text}")
+        raise HTTPException(
+            status_code=500, detail=f"Error while creating folder")
+
+
+def bulk_create_folder_nodes(payload, zone):
+    data = {
+        "payload": payload,
+        "zone": zone
+    }
+    create_url = ConfigClass.ENTITYINFO_SERVICE + "folders/batch"
+    _logger.info("create folder request payload: {}".format(payload))
+    respon = requests.post(create_url, json=data)
+    if respon.status_code == 200:
+        return respon.json()
+    else:
+        _logger.error(f"Error while bulk creating folder node : {respon.text}")
         raise HTTPException(
             status_code=500, detail=f"Error while creating folder")
 
