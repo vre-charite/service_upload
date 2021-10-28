@@ -10,7 +10,7 @@ build:
     - VRE-Deployment
   script:
     - docker login ${REGISTRY} -u ${DOCKER_USER} -p ${DOCKER_PASSWORD}
-    - docker build -t ${CONTAINER_IMAGE} .
+    - docker build --build-arg http_proxy=http://proxy.charite.de:8080/ --build-arg https_proxy=http://proxy.charite.de:8080/ -t ${CONTAINER_IMAGE} .
     - docker push ${CONTAINER_IMAGE}
 
 deploy:
