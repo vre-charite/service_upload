@@ -241,6 +241,7 @@ class APIFolderCreation:
             payload = {
                 'display_path': display_path,
                 'project_code': project_code,
+                'archived': False,
             }
             # also check if it is in greeroom or core
             neo4j_zone_label = "VRECore" if zone == "vrecore" else "Greenroom"

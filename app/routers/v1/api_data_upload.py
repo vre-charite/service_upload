@@ -2,9 +2,10 @@ import os
 import time
 import shutil
 import requests
+import jwt
 
 from typing import List
-from fastapi import APIRouter, BackgroundTasks, Header, File, UploadFile, Form
+from fastapi import APIRouter, BackgroundTasks, Header, File, UploadFile, Form, Request
 from fastapi_utils import cbv
 from typing import Optional
 
@@ -453,7 +454,8 @@ def finalize_worker(logger,
         # here now we dont deprecate the nfs completely
         # so we need to do some overwrite if the file exist
         target_path = os.path.join(target_head, request_payload.resumable_filename)
-        shutil.move(temp_merged_file_full_path, target_path)
+        dest = shutil.move(temp_merged_file_full_path, target_path)
+        logger.info("Destination path is: %s" % dest)
 
         # for backup also sync to minio
         logger.info("Minio Connection Test")
@@ -594,6 +596,10 @@ def finalize_worker(logger,
         status_mgr.go(EState.TERMINATED)
         unlock_resource(lock_key)
         raise exce
+    
+    finally:
+        #remove nfs files
+        os.remove(dest)
 
 
 def get_root_folder(folder_path):
