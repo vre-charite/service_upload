@@ -1,6 +1,7 @@
 import enum
 from ..models.base_models import APIResponse, EAPIResponseCode
 from functools import wraps
+from fastapi import HTTPException
 from requests import Response
 from ..commons.logger_services.logger_factory_service import SrvLoggerFactory
 
@@ -16,6 +17,18 @@ def catch_internal(api_namespace):
         async def inner(*args, **kwargs):
             try:
                 return await func(*args, **kwargs)
+            except HTTPException as exce:
+                respon = APIResponse()
+                respon.code = EAPIResponseCode.internal_error
+                respon.result = None
+                # the HTTPException has attribute detail
+                # but if use the str will give empty
+                err = api_namespace + " " + exce.detail
+                err_msg = customized_error_template(
+                    ECustomizedError.INTERNAL) % err
+                _logger.error(err_msg)
+                respon.error_msg = err_msg
+                return respon.json_response()
             except Exception as exce:
                 respon = APIResponse()
                 respon.code = EAPIResponseCode.internal_error

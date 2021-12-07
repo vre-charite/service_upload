@@ -2,16 +2,19 @@
 import os
 import re
 import requests
+import time
 from fastapi import APIRouter, HTTPException
 from fastapi_utils import cbv
 from ...commons.logger_services.logger_factory_service import SrvLoggerFactory
 from ...config import ConfigClass
+
 from ...models.base_models import APIResponse
 from ...models.models_upload import CreateFolderPOST, CreateFolderPOSTResponse, BulkCreateFolderPOST, BulkCreateFolderPOSTV2
+
 from ...resources.error_handler import catch_internal, EAPIResponseCode, \
     ECustomizedError, customized_error_template
 from ...resources.helpers import get_geid, bulk_get_geid
-import time
+from ...resources.lock import lock_resource, unlock_resource
 
 router = APIRouter()
 
@@ -20,6 +23,7 @@ _API_NAMESPACE = "api_folder_creation"
 
 _logger = SrvLoggerFactory('api_folder_creation').get_logger()
 
+# TODO this might be move out from the upload service <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 @cbv.cbv(router)
 class APIBulkFolderCreationV2:
@@ -204,6 +208,7 @@ class APIFolderCreation:
         folder_parent_geid = ""
         folder_parent_name = ""
         folder_relative_path = ""
+        display_path = None
 
         try:
             # create folder node
@@ -270,22 +275,22 @@ class APIFolderCreation:
                 },
             }
 
-            ########################################################
-            # Since we move to minio so deprecate the nfs folder
-            # there is no folder concept in minio so we just use
-            # the neo4j for display purpose
-            ########################################################
-            # try:
-            #     os.makedirs(folder_full_path)
-            #     query_response = create_folder_node(query_params=query)
+            # TODO decorator here?
+            # before the creation check if folder is on locked
+            # this purpose is to avoid racing in the two client
+            bucket_prefix = "core-" if zone == "vrecore" else "gr-"
+            folder_key = "%s/%s"%(bucket_prefix+project_code, display_path)
+            lock_resource(folder_key, "write")
+            
+            query_response = None
+            try:
+                query_response = create_folder_node(query_params=query)
+            except Exception as e:
+                raise e
+            finally:
+                # at the end unlock the folder
+                unlock_resource(folder_key, "write")
 
-            #     return query_response
-
-            # except FileExistsError as error:
-            #     _logger.error(f"Folder with name {folder_name} already exists in the destination {folder_full_path}")
-            #     return folder_name_conflict(_res, folder_name, folder_full_path)
-
-            query_response = create_folder_node(query_params=query)
             return query_response
 
         except Exception as error:
@@ -295,7 +300,11 @@ class APIFolderCreation:
 
 
 def create_folder_node(query_params) -> object:
-    """ create folder node using entity_info_service"""
+    """ 
+        create folder node using entity_info_service
+    """
+
+    # if folder is idle then we go on to create the folder
     payload = {
         **query_params
     }

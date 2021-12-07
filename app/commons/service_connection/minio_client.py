@@ -25,29 +25,23 @@ class Minio_Client_():
             credentials=c,
             secure=ConfigClass.MINIO_HTTPS)
 
+        # add a sanity check for the token to see if the token
+        # is expired
+        self.client.list_buckets()
+
 
     # function helps to get new token/refresh the token
     def _get_jwt(self):
         # print("refresh token")
-
+        # enable the token exchange with different azp
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         payload = {
-            "grant_type" : "refresh_token",
-            "refresh_token": self.refresh_token,
-            # "client_id":ConfigClass.MINIO_OPENID_CLIENT,
-        }
-
-        # some note here since the upload api will be used by the vre cli
-        # the keycloak clients are kind of different. the portal use `react-app`
-        # the cli use the `kong` so we need to use the `azp` attribute in token
-        # then we can refresh token to update the at
-        at = self.access_token.replace("Bearer ", "") # remove the bearer key for decoding
-        decode_at = jwt.decode(at, verify=False)
-        payload.update({"client_id": decode_at.get("azp")})
-        if decode_at.get("azp") == "kong":
-            payload.update({"client_secret": ConfigClass.KEYCLOAK_VRE_SECRET})
-
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded"
+            "grant_type" : "urn:ietf:params:oauth:grant-type:token-exchange",
+            "subject_token": self.access_token.replace("Bearer ", ""),
+            "subject_token_type":"urn:ietf:params:oauth:token-type:access_token",
+            "requested_token_type": "urn:ietf:params:oauth:token-type:refresh_token",
+            "client_id": "minio",
+            "client_secret": ConfigClass.KEYCLOAK_MINIO_SECRET
         }
 
         # use http request to fetch from keycloak

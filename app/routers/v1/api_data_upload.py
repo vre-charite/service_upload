@@ -3,6 +3,7 @@ import time
 import shutil
 import requests
 import jwt
+import unicodedata as ud
 
 from typing import List
 from fastapi import APIRouter, BackgroundTasks, Header, File, UploadFile, Form, Request
@@ -22,6 +23,7 @@ from ...commons.service_connection.minio_client import Minio_Client, Minio_Clien
 from ...resources.error_handler import catch_internal, ECustomizedError, customized_error_template
 from ...resources.helpers import update_file_operation_logs, get_geid, get_project, send_to_queue, \
     delete_by_session_id, generate_archive_preview
+from ...resources.lock import lock_resource, unlock_resource
 
 from ...models.folder import FolderMgr, FolderNode, batch_create_4j_foldernodes, batch_link_folders
 from ...models.file_data import SrvFileDataMgr
@@ -82,6 +84,10 @@ class APIUpload:
 
             # filename converting
             for upload_data in request_payload.data:
+                # here I have to update the special character into NFC form
+                # since some of the browser will encode them into NFD form
+                # for the bug detail. Please check the VRE-2244
+                upload_data.resumable_filename = ud.normalize("NFC", upload_data.resumable_filename)
                 upload_data.resumable_filename = upload_data.generate_id + "_" + upload_data.resumable_filename \
                     if upload_data.generate_id and upload_data.generate_id != "undefined" \
                     else upload_data.resumable_filename
@@ -110,22 +116,34 @@ class APIUpload:
                 os.environ.get('namespace')
             )
 
+            # TODO SOMEHOW REFACTOR HERE
+            # this varibale will be across the file node AND the folder node
+            # to record which node is locked. in case there is a error, we can 
+            # recover those file
+            locked_file_node = []
             for upload_data in request_payload.data:
                 # add lock
                 bucket = ("core-" if namespace == "vrecore" else "gr-") + request_payload.project_code
                 lock_key = os.path.join(bucket,
                     upload_data.resumable_relative_path,
                     upload_data.resumable_filename)
-                res_check_lock = check_lock(lock_key)
-                if res_check_lock.status_code == 200:
-                    lock_status = res_check_lock.json()['result']['status']
-                    if lock_status == 'LOCKED':
-                        _res.code = EAPIResponseCode.bad_request
-                        _res.error_msg = "Invalid operation, locked: {}".format(
-                            lock_key)
-                        return _res.json_response()
-                lock_resource(lock_key)
-                self.__logger.info("[INFO] lock added for: {}".format(lock_key))
+                # res_check_lock = check_lock(lock_key)
+                # if res_check_lock.status_code == 200:
+                #     lock_status = res_check_lock.json()['result']['status']
+                #     if lock_status == 'LOCKED':
+                #         _res.code = EAPIResponseCode.bad_request
+                #         _res.error_msg = "Invalid operation, locked: {}".format(
+                #             lock_key)
+                #         return _res.json_response()
+                try:
+                    lock_resource(lock_key, "write")
+                    locked_file_node.append((lock_key, "write"))
+                    self.__logger.info("[INFO] lock added for: {}".format(lock_key))
+                except Exception as e:
+                    _res.code = EAPIResponseCode.conflict
+                    _res.error_msg = str(e)
+                    return _res
+
                 # create folder and folder nodes
                 folder_mgr = FolderMgr(
                     created_folders_cache,
@@ -141,13 +159,22 @@ class APIUpload:
                 except FileExistsError as file_exist_error:
                     _res.code = EAPIResponseCode.conflict
                     _res.error_msg = str(file_exist_error)
+                    # recover the lock if there is error
+                    for resource_key, operation in locked_file_node:
+                        unlock_resource(resource_key, operation)
                     return _res.json_response()
                 except Exception as other_error:
                     self.__logger.error(str(other_error))
-                    raise
+                    # recover the lock if there is error
+                    for resource_key, operation in locked_file_node:
+                        unlock_resource(resource_key, operation)
+                    return _res.json_response()
+            
+                
                 last_folder_node_geid = folder_mgr.last_node.global_entity_id \
                     if folder_mgr.last_node else None
                 self.__logger.info("[INFO] Folders created: {}".format(lock_key))
+
                 # get job geid
                 resumable_identifier = get_geid()
                 self.__logger.info("[INFO] Fetched geid for: {}".format(lock_key))
@@ -156,6 +183,7 @@ class APIUpload:
                     upload_data.resumable_relative_path,
                     upload_data.resumable_filename)
                 self.__logger.info("[INFO] path calculated for: {}".format(lock_key))
+
                 # init empty status manager
                 status_mgr = FsmMgrUpload(
                     session_id,
@@ -189,20 +217,50 @@ class APIUpload:
                     status_mgr.set_status(EState.TERMINATED.name)
                     self.__logger.error("[INFO] Job failed: {}".format(lock_key))
                     raise exce
+                    
                 self.__logger.info("[SUCCEED] All tasks done for: {}".format(lock_key))
+
             # batch create folder nodes
             if len(to_create_folders) > 0:
-                first_node = to_create_folders[0]
-                zone = first_node["zone"]
-                res = batch_create_4j_foldernodes(to_create_folders, zone)
-                self.__logger.info("[SUCCEED] Neo4j Folders create result: {}".format(res.text))
-                relations_saved = batch_link_folders(folder_relations)
-                self.__logger.info("[SUCCEED] Neo4j Folders relations result: {}".format(relations_saved.text))
-            self.__logger.info("[SUCCEED] Neo4j Folders saved: {}".format(len(to_create_folders)))
+                # also try to lock the those new folder
+                locked_folder_node = []
+                try:
+                    for nodes in to_create_folders:
+                        bucket_prefix = "gr-" if nodes.get("zone")=="greenroom" else "core-"
+                        bucket = bucket_prefix+nodes.get("project_code")
+                        lock_key = "%s/%s"%(bucket, nodes.get("display_path"))
+                        lock_resource(lock_key, "write")
+                        locked_folder_node.append((lock_key, "write"))
+
+                    first_node = to_create_folders[0]
+                    zone = first_node["zone"]
+                    res = batch_create_4j_foldernodes(to_create_folders, zone)
+                    self.__logger.info("[SUCCEED] Neo4j Folders create result: {}".format(res.text))
+                    relations_saved = batch_link_folders(folder_relations)
+                    self.__logger.info("[SUCCEED] Neo4j Folders relations result: {}".format(relations_saved.text))
+                    self.__logger.info("[SUCCEED] Neo4j Folders saved: {}".format(len(to_create_folders)))
+                    
+                except Exception as e:
+                    # if we hit the lock then just return 409 already in use
+                    _res.code = EAPIResponseCode.conflict
+                    _res.result = str(e)
+                    # here ONLY the folder has some issue then we unlock the 
+                    # file node in previous
+                    for resource_key, operation in locked_file_node:
+                        unlock_resource(resource_key, operation)
+
+                    return _res.json_response()
+                finally:
+                    # here we unlock the locked nodes ONLY
+                    print("Start to unlock the nodes")
+                    for resource_key, operation in locked_folder_node:
+                        unlock_resource(resource_key, operation)
+
             redis_pipeline.execute()
             _res.code = EAPIResponseCode.success
             _res.result = job_list
             self.__logger.info("[SUCCEED] Done")
+
             return _res.json_response()
         else:
             _res.code = EAPIResponseCode.bad_request
@@ -276,9 +334,14 @@ class APIUpload:
             _res.result = {}
             _res.error_msg = "Invalid Session ID: " + str(session_id)
             return _res.json_response()
-        metadatas = {
-            "generate_id": generate_id
-        }
+            
+
+        self.__logger.info("resumable_filename: %s"%resumable_filename)
+        # here I have to update the special character into NFC form
+        # since some of the browser will encode them into NFD form
+        # for the bug detail. Please check the VRE-2244
+        resumable_filename = ud.normalize("NFC", resumable_filename)
+
         # check generate id
         resumable_filename = generate_id + "_" + resumable_filename \
             if generate_id and generate_id != "undefined" else resumable_filename
@@ -334,6 +397,12 @@ class APIUpload:
             _res.error_msg = "Invalid Session ID: " + str(session_id)
             return _res.json_response()
 
+        self.__logger.info("resumable_filename: %s"%request_payload.resumable_filename)
+        # here I have to update the special character into NFC form
+        # since some of the browser will encode them into NFD form
+        # for the bug detail. Please check the VRE-2244
+        request_payload.resumable_filename = ud.normalize("NFC", request_payload.resumable_filename)
+
         # check generate id
         request_payload.resumable_filename = request_payload.generate_id + "_" + request_payload.resumable_filename \
             if request_payload.generate_id and request_payload.generate_id != "undefined" \
@@ -364,6 +433,9 @@ class APIUpload:
             )
             for x in range(1, request_payload.resumable_total_chunks + 1)
         ]
+
+        self.__logger.info("resumable_filename: %s"%request_payload.resumable_filename)
+        self.__logger.info(chunk_paths)
 
         # add backgroud task to combine all recieved chunks
         background_tasks.add_task(finalize_worker, self.__logger, request_payload,
@@ -444,7 +516,15 @@ def finalize_worker(logger,
 
         with open(temp_merged_file_full_path, 'ab') as temp_file:
             for p in chunk_paths:
+                # since some browser has different encoding so
+                # we normalize the name with linux standard NFC
                 stored_chunk_file_name = p
+                logger.info('processing chunck %s'%stored_chunk_file_name)
+                # TODO since we using python 3.7 unicode data does not
+                # HAVE is_normalized form.
+                # if ud.normalize('NFC', p) != p:
+                #     stored_chunk_file_name = ud.normalize('NFC', p)
+
                 stored_chunk_file = open(stored_chunk_file_name, 'rb')
                 temp_file.write(stored_chunk_file.read())
                 stored_chunk_file.close()
@@ -486,7 +566,7 @@ def finalize_worker(logger,
             logger.info("Minio Upload Success")
         except Exception as e:
             logger.error("error when uploading: "+str(e))
-            unlock_resource(lock_key)
+            # unlock_resource(lock_key)
 
         # create entity file data
         file_meta_mgr = SrvFileDataMgr(logger)
@@ -529,7 +609,7 @@ def finalize_worker(logger,
         except Exception as e:
             geid = created_entity["global_entity_id"]
             logger.info(f'Error adding file preview for {geid}: {str(e)}')
-            unlock_resource(lock_key)
+            # unlock_resource(lock_key)
 
         
         # update full path to Greenroom/<display_path>
@@ -573,33 +653,35 @@ def finalize_worker(logger,
             shutil.rmtree(temp_dir)
         except Exception as exce:
             logger.info("Upload on succeed rmtree error: " + str(exce))
-            unlock_resource(lock_key)
+            # unlock_resource(lock_key)
         try:
             status_mgr.add_payload(
                 "source_geid",  created_entity["global_entity_id"])
             status_mgr.go(EState.SUCCEED)
         except Exception as exce:
             logger.info("Upload on succeed set status as succeed error: " + str(exce))
-            unlock_resource(lock_key)
+            # unlock_resource(lock_key)
         logger.info('Upload Job Done.')
-        unlock_resource(lock_key)
+        # unlock_resource(lock_key)
 
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         error_msg = 'folder {} is already empty'.format(temp_dir)
         logger.warning(error_msg)
-        unlock_resource(lock_key)
+        logger.warning(str(e))
+        # unlock_resource(lock_key)
 
     except Exception as exce:
         # catch internal error
         logger.error(str(exce))
         status_mgr.set_payload({"error_msg": str(exce)})
         status_mgr.go(EState.TERMINATED)
-        unlock_resource(lock_key)
+        # unlock_resource(lock_key)
         raise exce
     
     finally:
         #remove nfs files
         os.remove(dest)
+        unlock_resource(lock_key, "write")
 
 
 def get_root_folder(folder_path):
@@ -714,35 +796,3 @@ def response_conflic_folder_file_names(_res, conflict_file_paths, conflict_folde
         }
         return _res.json_response()
 
-def lock_resource(resource_key):
-    '''
-    lock resource
-    '''
-    url = ConfigClass.DATA_OPS_UTIL + 'resource/lock'
-    post_json = {
-        "resource_key": resource_key
-    }
-    response = requests.post(url, json=post_json)
-    return response
-
-def check_lock(resource_key):
-    '''
-    get resource lock
-    '''
-    url = ConfigClass.DATA_OPS_UTIL + 'resource/lock'
-    params = {
-        "resource_key": resource_key
-    }
-    response = requests.get(url, params=params)
-    return response
-
-def unlock_resource(resource_key):
-    '''
-    unlock resource
-    '''
-    url = ConfigClass.DATA_OPS_UTIL + 'resource/lock'
-    post_json = {
-        "resource_key": resource_key
-    }
-    response = requests.delete(url, json=post_json)
-    return response

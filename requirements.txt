@@ -13,3 +13,6 @@ redis==3.5.3
 Flask-JWT==0.3.2
 minio==7.0.3
 xmltodict==0.12.0
+python-dotenv==0.19.1
+pydantic==1.8.2
+

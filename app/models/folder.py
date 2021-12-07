@@ -147,7 +147,8 @@ class FolderNode:
         query = {
             "folder_relative_path": self.folder_relative_path,
             "name": self.folder_name,
-            "project_code": self.project_code
+            "project_code": self.project_code,
+            "archived": False,
         }
         respon_query = http_query_node_zone(self.zone, query)
         if respon_query.status_code == 200:
@@ -219,7 +220,8 @@ class FolderNode:
             "folder_relative_path": self.folder_relative_path,
             "zone": self.zone,
             "project_code": self.project_code,
-            "folder_tags": self.folder_tags
+            "folder_tags": self.folder_tags,
+            "display_path": self.folder_relative_path + '/' + self.folder_name
         }
         return payload
 
@@ -348,7 +350,7 @@ def batch_link_folders(relations):
     # bulk create relations
     data = {
         "payload": relations,
-        "pamras_location": ['start', 'end'],
+        "params_location": ['start', 'end'],
         "start_label": "Folder",
         "end_label": 'Folder'
     }
