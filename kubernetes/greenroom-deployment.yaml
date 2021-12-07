@@ -33,6 +33,10 @@ spec:
             value: "charite"
           - name: namespace
             value: "greenroom"
+          - name: CONFIG_CENTER_ENABLED
+            value: "true"
+          - name: CONFIG_CENTER_BASE_URL
+            value: "http://common.utility:5062/"
           readinessProbe:
             tcpSocket:
               port: 5079
