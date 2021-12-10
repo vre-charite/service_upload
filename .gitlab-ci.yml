@@ -1,7 +1,7 @@
 image: docker:latest
 
 variables:
-  REGISTRY: 10.32.42.225:5000
+  REGISTRY: s-hdp-vre-v007.charite.de
   CONTAINER_IMAGE: ${REGISTRY}/upload:${CI_COMMIT_SHORT_SHA}
 
 build:

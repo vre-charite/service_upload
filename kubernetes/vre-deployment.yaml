@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: upload
-          image: 10.32.42.225:5000/upload:<VERSION>
+          image: s-hdp-vre-v007.charite.de/upload:<VERSION>
           ports:
             - containerPort: 5079
           env:
