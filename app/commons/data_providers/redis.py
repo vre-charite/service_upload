@@ -1,13 +1,36 @@
-from redis import StrictRedis
-from ...config import ConfigClass
+# Copyright 2022 Indoc Research
+# 
+# Licensed under the EUPL, Version 1.2 or – as soon they
+# will be approved by the European Commission - subsequent
+# versions of the EUPL (the "Licence");
+# You may not use this work except in compliance with the
+# Licence.
+# You may obtain a copy of the Licence at:
+# 
+# https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
+# 
+# Unless required by applicable law or agreed to in
+# writing, software distributed under the Licence is
+# distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+# express or implied.
+# See the Licence for the specific language governing
+# permissions and limitations under the Licence.
+# 
+
 from enum import Enum
-from ..logger_services.logger_factory_service import SrvLoggerFactory
 
-_logger = SrvLoggerFactory('SrvRedisSingleton').get_logger()
+from aioredis import StrictRedis
 
+from app.commons.logger_services.logger_factory_service import SrvLoggerFactory
+from app.config import ConfigClass
+
+_logger = SrvLoggerFactory('SrvAioRedisSingleton').get_logger()
 REDIS_INSTANCE = {}
 
-class SrvRedisSingleton():
+
+class SrvAioRedisSingleton:
+    """we should replace StrictRedis with aioredis https://aioredis.readthedocs.io/en/latest/getting-started/"""
 
     def __init__(self):
         self.host = ConfigClass.REDIS_HOST
@@ -20,56 +43,53 @@ class SrvRedisSingleton():
         global REDIS_INSTANCE
         if REDIS_INSTANCE:
             self.__instance = REDIS_INSTANCE
-            # _logger.info("[SUCCEED] SrvRedisSingleton Connection found, no need for connecting")
+            # _logger.info("[SUCCEED] SrvAioRedisSingleton Connection found, no need for connecting")
             pass
         else:
-            REDIS_INSTANCE = StrictRedis(host=self.host,
-                                          port=self.port,
-                                          db=self.db,
-                                          password=self.pwd)
+
+            REDIS_INSTANCE = StrictRedis(host=self.host, port=self.port, db=self.db, password=self.pwd)
             self.__instance = REDIS_INSTANCE
-            _logger.info("[SUCCEED] SrvRedisSingleton Connection initialized.")
+            _logger.info('[SUCCEED] SrvAioRedisSingleton Connection initialized.')
 
-    def get_pipeline(self):
-        return self.__instance.pipeline()
+    async def get_pipeline(self):
+        return await self.__instance.pipeline()
 
-    def get_by_key(self, key: str):
-        return self.__instance.get(key)
+    async def get_by_key(self, key: str):
+        return await self.__instance.get(key)
 
-    def set_by_key(self, key: str, content: str):
-        res = self.__instance.set(key, content)
-        # _logger.debug(key + ":  " + content)
+    async def set_by_key(self, key: str, content: str):
+        await self.__instance.set(key, content)
 
-    def mget_by_prefix(self, prefix: str):
+    async def mget_by_prefix(self, prefix: str):
         # _logger.debug(prefix)
         query = '{}:*'.format(prefix)
-        keys = self.__instance.keys(query)
-        return self.__instance.mget(keys)
+        keys = await self.__instance.keys(query)
+        return await self.__instance.mget(keys)
 
-    def check_by_key(self, key: str):
-        return self.__instance.exists(key)
+    async def check_by_key(self, key: str):
+        return await self.__instance.exists(key)
 
-    def delete_by_key(self, key: str):
-        return self.__instance.delete(key)
+    async def delete_by_key(self, key: str):
+        return await self.__instance.delete(key)
 
-    def mdelete_by_prefix(self, prefix: str):
+    async def mdelete_by_prefix(self, prefix: str):
         _logger.debug(prefix)
         query = '{}:*'.format(prefix)
-        keys = self.__instance.keys(query)
+        keys = await self.__instance.keys(query)
         for key in keys:
-            self.__instance.delete(key)
+            await self.__instance.delete(key)
 
-    def get_by_pattern(self, key: str, pattern: str):
+    async def get_by_pattern(self, key: str, pattern: str):
         query_string = '{}:*{}*'.format(key, pattern)
-        keys = self.__instance.keys(query_string)
-        return self.__instance.mget(keys)
+        keys = await self.__instance.keys(query_string)
+        return await self.__instance.mget(keys)
 
-    def publish(self, channel, data):
-        res = self.__instance.publish(channel, data)
+    async def publish(self, channel, data):
+        res = await self.__instance.publish(channel, data)
         return res
 
-    def subscriber(self, channel):
-        p = self.__instance.pubsub()
+    async def subscriber(self, channel):
+        p = await self.__instance.pubsub()
         p.subscribe(channel)
         return p
 
