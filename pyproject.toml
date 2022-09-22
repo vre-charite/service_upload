@@ -1,0 +1,72 @@
+// Copyright 2022 Indoc Research
+// 
+// Licensed under the EUPL, Version 1.2 or – as soon they
+// will be approved by the European Commission - subsequent
+// versions of the EUPL (the "Licence");
+// You may not use this work except in compliance with the
+// Licence.
+// You may obtain a copy of the Licence at:
+// 
+// https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
+// 
+// Unless required by applicable law or agreed to in
+// writing, software distributed under the Licence is
+// distributed on an "AS IS" basis,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+// express or implied.
+// See the Licence for the specific language governing
+// permissions and limitations under the Licence.
+// 
+
+[tool.poetry]
+name = "service_upload"
+version = "0.2.3"
+description = ""
+authors = []
+
+[tool.poetry.dependencies]
+python = "^3.7"
+fastapi = "0.62.0"
+fastapi-utils = "0.2.1"
+uvicorn = "0.12.3"
+gunicorn = "20.0.4"
+uvloop = "0.14.0"
+httptools = "0.1.1"
+PyJWT = "1.4.2"
+python-multipart = "0.0.5"
+python-json-logger = "0.1.11"
+aiofiles = "0.6.0"
+minio = "7.0.3"
+xmltodict = "0.12.0"
+python-dotenv = "0.19.1"
+pydantic = "1.8.2"
+opentelemetry-instrumentation-fastapi = "^0.27b0"
+opentelemetry-instrumentation-httpx = "^0.27b0"
+opentelemetry-sdk = "^1.8.0"
+opentelemetry-exporter-jaeger = "^1.8.0"
+opentelemetry-instrumentation-asyncpg = "^0.27b0"
+opentelemetry-instrumentation = "^0.27b0"
+asyncpg = "0.25.0"
+httpx = "^0.21.3"
+aioredis = "^2.0.1"
+common = "^0.0.19"
+
+[tool.poetry.dev-dependencies]
+pytest = "6.2.5"
+pytest-env = "0.6.2"
+flake8 = "^4.0.1"
+requests = "^2.24.0"
+pytest-cov = "^3.0.0"
+pytest-httpx = "^0.17.3"
+pytest-asyncio = "^0.17.2"
+async-asgi-testclient = "^1.4.9"
+mock = "^4.0.3"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "pilot"
+url = "https://git.indocresearch.org/api/v4/groups/pilot/-/packages/pypi/simple"
+default = true
